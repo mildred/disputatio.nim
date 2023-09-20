@@ -1,10 +1,13 @@
 import std/uri
 import std/strformat
+import std/strutils
 import std/options
 import std/cgi
 import std/times
+import std/json
 import smtp
 import nauthy
+import jwt
 
 import ../utils/parse_port
 import ../context
@@ -41,6 +44,23 @@ proc send_code(ctx: AppContext, email, code: string, url: uri.Uri) =
       ("X-Login-Code", code)
     ]))
 
+proc send_code_api(ctx: AppContext, email, code: string) =
+  let link_url = ctx.getFormParamsOption("email_url_template").get("").replace("{code}", code)
+  let email_subject = ctx.getFormParamsOption("email_subject_template").get(
+    "Your login code: {code}"
+  ).replace("{code}", code)
+  let email_body = ctx.getFormParamsOption("email_body_template").get(
+    "The log-in code is:\n\n\t{code}\n\n-- \nPlease do not reply to this automated message.\n"
+  ).replace("{code}", code).replace("{url}", link_url).replace("\r\n", "\n").replace("\n", "\r\n")
+
+  send_email(ctx.smtp, ctx.sender, email, $createMessage(
+    email_subject, email_body,
+    @[email], @[],
+    @[
+      ("X-Login-URL", link_url),
+      ("X-Login-Code", code)
+    ]))
+
 proc get*(ctx: Context) {.async, gcsafe.} =
   let db = AppContext(ctx).db
   let redirect_url = ctx.getQueryParamsOption("redirect_url").get("")
@@ -66,13 +86,13 @@ proc get*(ctx: Context) {.async, gcsafe.} =
 
   resp ctx.layout(login_totp(email, code, redirect_url), title = "Login")
 
-proc post*(ctx: Context) {.async, gcsafe.} =
+proc post(ctx: AppContext, api: bool) {.async, gcsafe.} =
   var totp: Totp
-  let db = AppContext(ctx).db
-  let redirect_url = ctx.getPostParamsOption("redirect_url").get("")
-  let email = ctx.getPostParamsOption("email").get()
+  let db = ctx.db
+  let redirect_url = ctx.getFormParamsOption("redirect_url").get("")
+  let email = ctx.getFormParamsOption("email").get()
   let email_hash = hash_email(email)
-  let otp = ctx.getPostParamsOption("otp")
+  let otp = ctx.getFormParamsOption("otp")
   let user = db[].get_user(email_hash)
 
   # No code provided or the user does not exists
@@ -87,13 +107,17 @@ proc post*(ctx: Context) {.async, gcsafe.} =
 
     # Send code via e-mail
     let code = totp.now()
-    var url = ctx.request.url / email
-    url.hostname = ctx.request.headers["host", 0]
-    url.scheme = if ctx.request.secure: "https" else: "http"
     echo &"TOTP code for {email}: {code}"
-    send_code(AppContext(ctx), email, code, url)
 
-    resp redirect($ (parse_uri("/login/" & email.encodeUrl()) ? { "redirect_url": redirect_url }))
+    if api:
+      send_code_api(ctx, email, code)
+      resp json_response(%*{ "otp_sent": true })
+    else:
+      var url = ctx.request.url / email
+      url.hostname = ctx.request.headers["host", 0]
+      url.scheme = if ctx.request.secure: "https" else: "http"
+      send_code(ctx, email, code, url)
+      resp redirect($ (parse_uri("/login/" & email.encodeUrl()) ? { "redirect_url": redirect_url }))
     return
 
   # code provided, check with OTP secret and store user in session
@@ -102,7 +126,10 @@ proc post*(ctx: Context) {.async, gcsafe.} =
 
   let totp_url = user.get().get_email(email_hash).get().totp_url
   if not validate_totp(totp_url, otp.get, 10*60):
-    resp ctx.layout(login_form(redirect_url), title = "Retry Login")
+    if api:
+      resp json_response(%*{ "otp_sent": false, "otp_valid": false })
+    else:
+      resp ctx.layout(login_form(redirect_url), title = "Retry Login")
     return
 
   var pod_url = ctx.request.url / email
@@ -112,6 +139,22 @@ proc post*(ctx: Context) {.async, gcsafe.} =
   db[].ensure_user_in_pod(user.get().id, $pod_url, email_hash)
 
   db[].user_email_mark_valid(email_hash)
+
+  if api:
+    var token = toJWT(%*{
+      "header": {
+        "alg": "HS256",
+        "typ": "JWT"
+      },
+      "claims": {
+        "userId": %email,
+      }
+    })
+    token.sign(ctx.secretkey)
+
+    resp json_response(%*{ "otp_sent": false, "otp_valid": true, "token": % $token })
+    return
+
   ctx.session["email"] = email
 
   if redirect_url != "":
@@ -119,6 +162,12 @@ proc post*(ctx: Context) {.async, gcsafe.} =
     return
 
   resp ctx.layout(login_totp_ok(totp_url), title = "Login succeeded")
+
+proc post*(ctx: Context) {.async, gcsafe.} =
+  await post(AppContext(ctx), api = false)
+
+proc post_api*(ctx: Context) {.async, gcsafe.} =
+  await post(AppContext(ctx), api = true)
 
 proc get_logout*(ctx: Context) {.async, gcsafe.} =
   resp ctx.layout(logout_form(), title = "Logout")

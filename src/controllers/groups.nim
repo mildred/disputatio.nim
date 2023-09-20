@@ -1,6 +1,7 @@
 import std/strformat
 import std/strutils
 import std/parseutils
+import std/json
 import prologue
 
 import ./errors
@@ -10,6 +11,36 @@ import ../db/groups
 import ../db/articles
 import ../views/layout
 import ../views/groups as vgroups
+
+export compute_payload
+
+proc api_create*(ctx: Context) {.async, gcsafe.} =
+  let db  = AppContext(ctx).db
+  let req = parse_json(ctx.request.body())
+  let gi  = new(GroupItem)
+
+  gi[] = GroupItem.from_json(req)
+
+  if gi[].parent_guid != "":
+    # TODO: check if the new group item is authorized
+    # - must be authored by a group member
+    # - the group member must have the corresponding permissions
+    # - or the group is an open group and the new item only adds the current
+    #   user.
+    # - ...
+    resp json_response(%*{
+      "error": %"not_authorized"
+    }, code = Http400)
+    return
+
+  gi[].compute_new()
+  db[].save_new(gi[])
+
+  resp json_response(%*{
+    "group_guid": %gi.guid,
+    # "group_payload": %gi[].compute_payload(),
+    "group": gi[].to_json_node()
+  })
 
 proc create*(ctx: Context) {.async, gcsafe.} =
   let db = AppContext(ctx).db
@@ -35,7 +66,9 @@ proc create*(ctx: Context) {.async, gcsafe.} =
     i.pod_url = p.pod_url
     i.local_user_id = p.local_user_id
     m.items.add(i)
-  gi[].members.add(m)
+
+  if ctx.getFormParamsOption("empty_group").is_none():
+    gi[].members.add(m)
 
   if preset == "identity":
     # Private identity : note to self
@@ -64,7 +97,7 @@ proc get_group*(ctx: Context): tuple[group: Option[GroupItem], member: Option[Gr
   var g = db[].get_group(group_guid)
   var member: Option[GroupMember]
 
-  if g.is_some():
+  if g.is_some() and current_user.is_some:
     member = g.get.find_current_user(current_user.get.id)
     if g.get.group_type == 0 and member.is_none():
       g = none(GroupItem)
@@ -102,7 +135,13 @@ proc join*(ctx: Context) {.async, gcsafe.} =
   gi.compute_new()
   db[].save_new(gi)
 
-  resp redirect(&"/@{gi.root_guid}/", code = Http303)
+  if AppContext(ctx).api:
+    resp json_response(%*{
+      "member": m.to_json_node(),
+      "group_item": gi.to_json_node()
+    })
+  else:
+    resp redirect(&"/@{gi.root_guid}/", code = Http303)
 
 proc show*(ctx: Context) {.async, gcsafe.} =
   let db = AppContext(ctx).db
@@ -113,3 +152,18 @@ proc show*(ctx: Context) {.async, gcsafe.} =
   let posts = db[].group_get_posts(g.get)
 
   resp ctx.layout(group_show(g.get, member, posts), title = &"{g.get.name} | groups")
+
+proc json_info*(ctx: Context) {.async, gcsafe.} =
+  let db = AppContext(ctx).db
+  let (g, member) = ctx.get_group()
+
+  if g.is_none():
+    resp json_response(%*{
+      "error": %"not_found"
+    }, code = Http404)
+    return
+
+  resp json_response(%*{
+    "group": %g.get.to_json_node(),
+    "member": (if member.is_none(): newJNull() else: member.get().to_json_node()),
+  })

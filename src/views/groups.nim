@@ -24,6 +24,10 @@ func group_new*(): string = tmpli html"""
       <input type="text" name="name" placeholder="name" />
       <input type="text" name="seed_userdata" placeholder="seed" />
       <input type="text" name="self_nickname" placeholder="our nickname" />
+      <label>
+        <input type="checkbox" name="empty_group" value="1" />
+        Empty group
+      </label>
       <select name="group_type">
         <option value="0">strict private group</option>
         <option value="1">unlisted private group</option>

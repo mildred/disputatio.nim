@@ -10,6 +10,10 @@ proc get_user_version*(): tuple[value: int] {.importdb: "PRAGMA user_version".}
 proc set_user_version*(db: var Database, v: int) =
   discard db.exec(&"PRAGMA user_version = {$v}")
 
+# proc set_schema(name: string, sql: string) {.importdb: """
+#   ALTER TABLE sqlite_schema SET sql = $sql WHERE name = $name
+# """
+
 iterator table_schema_sql(): tuple[sql: string] {.importdb: "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL".} = discard
 
 proc get_schema(db: var Database): seq[string] =
@@ -338,6 +342,67 @@ proc migrate*(db: var Database): bool =
           );
         """)
         user_version = 7
+      of 7:
+        db.exec("""
+          CREATE TABLE IF NOT EXISTS new_articles (
+            id                  INTEGER PRIMARY KEY NOT NULL,
+            guid                TEXT NOT NULL,
+            patch_id            INTEGER NOT NULL,
+            patch_guid          TEXT NOT NULL,
+            user_id             INTEGER,
+
+            -- the article it modified
+            mod_article_id      INTEGER DEFAULT NULL,
+            mod_article_guid    INTEGER DEFAULT NULL,
+
+            -- the item replying to, may be NULL
+            reply_guid          TEXT DEFAULT NULL,      -- object guid being replied to (article)
+            reply_index         INTEGER DEFAULT NULL,   -- paragraph replied to within article
+
+            -- author of the message
+            -- the message is not published here, the group is only used to keep track of the author
+            author_group_id     INTEGER NOT NULL,       -- author personal group
+            author_group_guid   TEXT NOT NULL,
+            author_member_id    INTEGER,                -- member local_id (optional)
+
+            -- group the article belongs to (can be same as author_group)
+            -- where the message is published. If the group is public (others readable) the reply is readable to anyone who has access to the original item
+            group_id            INTEGER NOT NULL,
+            group_guid          TEXT NOT NULL,
+            group_member_id     INTEGER,                -- local_id of member (NULL if other)
+
+            kind                TEXT,                   -- could be topic, comment, reaction, ...
+            timestamp           REAL NOT NULL DEFAULT (julianday('now')),
+
+            CONSTRAINT guid_unique UNIQUE (guid)
+            FOREIGN KEY (mod_article_id) REFERENCES articles (id),
+            FOREIGN KEY (mod_article_guid) REFERENCES articles (guid),
+            FOREIGN KEY (patch_id) REFERENCES patches (id),
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (author_group_id) REFERENCES group_items (id),
+            FOREIGN KEY (author_group_guid) REFERENCES group_items (guid),
+            FOREIGN KEY (group_id) REFERENCES group_items (id),
+            FOREIGN KEY (group_guid) REFERENCES group_items (guid)
+          );
+        """)
+        db.exec("""
+          ALTER TABLE articles ADD COLUMN kind TEXT;
+        """)
+        db.exec("""
+          INSERT INTO new_articles
+          SELECT  id, guid, patch_id, patch_guid, user_id, mod_article_id,
+                  mod_article_guid, reply_guid, reply_index, author_group_id,
+                  author_group_guid, author_member_id, group_id, group_guid,
+                  group_member_id, kind, timestamp
+          FROM articles;
+        """)
+        db.exec("""
+          DROP TABLE articles;
+        """)
+        db.exec("""
+          ALTER TABLE new_articles RENAME TO articles;
+        """)
+        user_version = 8
       else:
         migrating = false
       if migrating:

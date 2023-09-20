@@ -56,7 +56,12 @@ proc update*(ctx: Context) {.async, gcsafe.} =
 
   let name = ctx.getPathParams("name", "")
   var article: Article
-  article.subject_name = name
+
+  if name != "":
+    var sub: Subject = (name: name)
+    article.reply_guid = sub.compute_hash()
+    db[].insert_subject(article.reply_guid, sub.name)
+
   article.user_id = current_user.get.id
   article.from_html(html.get)
 

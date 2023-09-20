@@ -1,5 +1,5 @@
 const schema* = @["""
-PRAGMA user_version = 7""", """
+PRAGMA user_version = 8""", """
 CREATE TABLE users (
             id            INTEGER PRIMARY KEY NOT NULL
           )""", """
@@ -108,7 +108,7 @@ CREATE TABLE user_pods (
             CONSTRAINT user_id_pod_url_unique UNIQUE (user_id, pod_url),
             FOREIGN KEY (user_id) REFERENCES users (id)
           )""", """
-CREATE TABLE articles (
+CREATE TABLE "articles" (
             id                  INTEGER PRIMARY KEY NOT NULL,
             guid                TEXT NOT NULL,
             patch_id            INTEGER NOT NULL,
@@ -135,6 +135,7 @@ CREATE TABLE articles (
             group_guid          TEXT NOT NULL,
             group_member_id     INTEGER,                -- local_id of member (NULL if other)
 
+            kind                TEXT,                   -- could be topic, comment, reaction, ...
             timestamp           REAL NOT NULL DEFAULT (julianday('now')),
 
             CONSTRAINT guid_unique UNIQUE (guid)

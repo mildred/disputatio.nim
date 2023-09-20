@@ -42,20 +42,35 @@ proc cmp(a, b: GroupMemberItem): int =
 proc cmp(a, b: GroupMember): int =
   result = system.cmp[int](a.local_id, b.local_id)
 
+proc from_json*(t: typedesc[GroupMemberItem], j: JsonNode): GroupMemberItem =
+  result.pod_url       = j[0].get_str
+  result.local_user_id = j[1].get_str
+
 proc to_json_node(items: seq[GroupMemberItem]): JsonNode =
   result = newJArray()
   for m in items.sorted(cmp):
     result.add(%*[m.pod_url, m.local_user_id])
 
+proc to_json_node*(m: GroupMember): JsonNode =
+  result = %*{
+    "id": m.local_id,
+    "nick": m.nickname,
+    "w": m.weight,
+    "addrs": m.items.to_json_node()
+  }
+
+proc from_json*(t: typedesc[GroupMember], j: JsonNode): GroupMember =
+  result.local_id = j["id"].get_int
+  result.nickname = j["nick"].get_str
+  result.weight   = j["w"].get_float
+  result.items    = @[]
+  for itm in items(j["addrs"]):
+    result.items.add(GroupMemberItem.from_json(itm))
+
 proc to_json_node(members: seq[GroupMember]): JsonNode =
   result = newJArray()
   for m in members.sorted(cmp):
-    result.add(%*{
-      "id": m.local_id,
-      "nick": m.nickname,
-      "w": m.weight,
-      "addrs": m.items.to_json_node()
-    })
+    result.add(m.to_json_node())
 
 proc to_json_node*(gi: GroupItem): JsonNode =
   result = %*{
@@ -72,13 +87,32 @@ proc to_json_node*(gi: GroupItem): JsonNode =
   if gi.parent_guid != "":
     result["parent"] = %*gi.parent_guid
 
+proc from_json*(t: typedesc[GroupItem], j: JsonNode): GroupItem =
+  assert j["t"].get_str == "group-item"
+  result.members       = @[]
+  result.name          = j["n"].get_str
+  result.group_type    = j["gt"].get_int
+  result.seed_userdata = j["ud"].get_str
+  result.others_members_weight    = j["ow"].get_float
+  result.moderation_default_score = j["s"].get_float
+  if j.has_key("root"):
+    result.root_guid = j["root"].get_str
+  if j.has_key("parent"):
+    result.parent_guid = j["parent"].get_str
+  for member in items(j["m"]):
+    result.members.add(GroupMember.from_json(member))
+
 proc compute_hash*(obj: GroupItem): string =
   result = obj.to_json_node().compute_hash()
 
+proc compute_payload*(obj: GroupItem): string =
+  result = obj.to_json_node().compute_payload()
+
 proc compute_new*(gi: var GroupItem) =
   gi.guid = gi.compute_hash()
+  if gi.parent_guid == "": gi.root_guid = gi.guid
 
-proc insert_group_item(guid, root_guid: string, parent_guid: Option[string], parent_id: Option[int], name, seed_userdata: string, group_type: int, others_members_weight: float, moderation_default_score: float): tuple[id: int] {.importdb: """
+proc insert_group_item(guid, root_guid: string, parent_guid: Option[string], parent_id: Option[int], name, seed_userdata: string, group_type: int, others_members_weight: float, moderation_default_score: float): Option[tuple[id: int]] {.importdb: """
   INSERT INTO group_items (guid, root_guid, parent_id, parent_guid, name, seed_userdata, group_type, others_members_weight, moderation_default_score)
   VALUES ($guid, $root_guid, $parent_id, $parent_guid, $name, $seed_userdata, $group_type, $others_members_weight, $moderation_default_score)
   ON CONFLICT DO NOTHING
@@ -181,10 +215,11 @@ proc save_new*(db: var Database, gi: GroupItem) =
       parent_guid = some(gi.parent_guid)
 
     let group = db.insert_group_item(gi.guid, root_guid, parent_guid, parent_id, gi.name, gi.seed_userdata, gi.group_type, gi.others_members_weight, gi.moderation_default_score)
-    for member in gi.members:
-      let mem = db.insert_group_member(member.local_id, group.id, member.nickname, member.weight, member.user_id)
-      for item in member.items:
-        discard db.insert_group_member_item(mem.id, item.pod_url, item.local_user_id)
+    if group.is_some():
+      for member in gi.members:
+        let mem = db.insert_group_member(member.local_id, group.get.id, member.nickname, member.weight, member.user_id)
+        for item in member.items:
+          discard db.insert_group_member_item(mem.id, item.pod_url, item.local_user_id)
 
 proc list_groups_with_user*(db: var Database, user_id: int): seq[GroupItem] =
   result = @[]
