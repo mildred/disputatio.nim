@@ -18,7 +18,7 @@ Usage: disputatio [options]
 Options:
   -h, --help            Print help
   --version             Print version
-  -p, --listen <addr>   Specify a different port [default: localhost:8080]
+  --listen <addr>       Specify a different port [default: localhost:8080]
                         Specify sd=0 for first systemd socket activation
                         or specify sd=[NAME:]N
   --secretkey <key>     Secret key for HTTP sessions
@@ -83,7 +83,7 @@ when isMainModule:
     secretkey = random_string(16).to_hex()
     echo "Using secret key: " & secretkey
 
-  let settings = newSettings(address = "localhost", port = Port(8080), secretkey = secretkey)
+  let settings = newSettings(address = address, port = port, secretkey = secretkey)
 
   let db = open_database(dbfile)
   discard db
