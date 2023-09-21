@@ -25,6 +25,9 @@ Options:
   -d, --db <file>       Database file [default: ./disputatio.sqlite]
   --assets <dir>        Assets directory [default: ./assets/]
   --smtp <server>       SMTP server for sending e-mails
+  --smtp-tls <tls>      TLS security (none, auto, tls, starttls)
+  --smtp-user <user>    SMTP username
+  --smtp-pass <pass>    SMTP password
   --sender <email>      Sending address for e-mails
 """) & (when not defined(version): "" else: &"""
 
@@ -38,7 +41,10 @@ when isMainModule:
   var secretkey = ""
   var dbfile = "./disputatio.sqlite"
   var assets = "./assets/"
-  var smtp = ""
+  var smtp: SmtpConf
+  var smtp_user = ""
+  var smtp_pass = ""
+  var smtp_tls = "auto"
   var sender = ""
 
   const shortNoVal = {'h'}
@@ -61,10 +67,13 @@ when isMainModule:
           quit(1)
 
       of "secretkey": secretkey = val
-      of "db":     dbfile = val
-      of "assets": assets = val
-      of "smtp":   smtp = val
-      of "sender": sender = val
+      of "db":        dbfile = val
+      of "assets":    assets = val
+      of "smtp":      smtp.host = val
+      of "smtp-tls":  smtp.tls = val
+      of "smtp-user": smtp.user = val
+      of "smtp-pass": smtp.pass = val
+      of "sender":    sender = val
       of "help", "h":
         echo doc
         quit()

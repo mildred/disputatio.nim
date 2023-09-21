@@ -16,15 +16,23 @@ import ../views/[layout, login_form, login_totp, logout_form]
 
 import prologue
 
-proc send_email(smtp_conn: string, sender, recipient: string, msg: string) =
-  if smtp_conn == "":
+proc send_email(server: SmtpConf, sender, recipient: string, msg: string) =
+  if server.host == "":
     echo &"No SMTP configured, failed to send e-mail:\nMAIL FROM: {sender}\nRCPT TO: {recipient}\n{msg}"
     return
 
-  echo &"Connecting to {smtp_conn}"
-  let (smtp_server, smtp_port) = parse_addr_and_port(smtp_conn, 25)
-  var smtpConn = newSmtp()
+  echo &"Connecting to {server.host}"
+  let (smtp_server, smtp_port) = parse_addr_and_port(server.host, 25)
+
+  let tls = server.tls == "tls" or (server.tls == "auto" and int(smtp_port) == 465)
+  let starttls = (not tls) and server.tls != "none"
+
+  var smtpConn = newSmtp(use_ssl = tls)
   smtpConn.connect(smtp_server, smtp_port)
+  if starttls:
+    smtpConn.starttls()
+  if server.user != "":
+    smtpConn.auth(server.user, server.pass)
   defer: smtpConn.close()
   smtpConn.sendMail(sender, @[recipient], msg)
 

@@ -11,17 +11,23 @@ export hash_email
 proc current_user_guid*(ctx: Context): string =
   hash_email(ctx.session["email"])
 
+type SmtpConf* = tuple
+  host: string
+  user: string
+  pass: string
+  tls:  string
+
 type AppContext* = ref object of Context
   db*: ref Database
   db_file*: string
-  smtp*: string
+  smtp*: SmtpConf
   sender*: string
   assets_dir*: string
   secretkey*: string
   api*: bool
   login_bearer*: bool
 
-proc contextMiddleware*(db_file, assets_dir, smtp, sender, secretkey: string): HandlerAsync =
+proc contextMiddleware*(db_file, assets_dir: string, smtp: SmtpConf, sender, secretkey: string): HandlerAsync =
   result = proc(ctx: Context) {.async.} =
     let ctx = AppContext(ctx)
     ctx.api = false
