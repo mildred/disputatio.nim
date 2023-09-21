@@ -1,6 +1,7 @@
 import std/os
 import std/parseopt
 import std/strutils
+import std/strformat
 import prologue
 import prologue/middlewares/sessions/signedcookiesession
 from prologue/core/urandom import random_string
@@ -29,22 +30,25 @@ Options:
   --smtp-user <user>    SMTP username
   --smtp-pass <pass>    SMTP password
   --sender <email>      Sending address for e-mails
-""") & (when not defined(version): "" else: """
+""") & (when not defined(version): "" else: &"""
 
-Version: """ & version & """
+Version: {version}
 """)
 
 
 when isMainModule:
+  when defined(version):
+    echo &"Starting disputatio version {version}"
+  else:
+    echo "Starting disputatio"
+
   var address = "localhost"
   var port = Port(8080)
   var secretkey = ""
   var dbfile = "./disputatio.sqlite"
   var assets = "./assets/"
   var smtp: SmtpConf
-  var smtp_user = ""
-  var smtp_pass = ""
-  var smtp_tls = "auto"
+  smtp.tls = "auto"
   var sender = ""
 
   const shortNoVal = {'h'}
@@ -96,6 +100,8 @@ when isMainModule:
 
   let db = open_database(dbfile)
   discard db
+
+  echo &"Use SMTP config {smtp.tls} {smtp.host} user={smtp.user}"
 
   var app = newApp(settings)
   app.use(contextMiddleware(dbfile, assets, smtp, sender, secretkey))
