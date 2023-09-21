@@ -53,8 +53,9 @@ when isMainModule:
 
   const shortNoVal = {'h'}
   const longNoVal = @["help", "version"]
+  var opts = initOptParser(@[], shortNoVal = shortNoVal, longNoVal = longNoVal, allowWhitespaceAfterColon = false)
 
-  for kind, key, val in getopt(shortNoVal = shortNoVal, longNoVal = longNoVal):
+  for kind, key, val in opts.getopt():
     case kind
     of cmdArgument:
       echo "Unknown argument " & key
