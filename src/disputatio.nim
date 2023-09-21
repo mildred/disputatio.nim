@@ -29,9 +29,9 @@ Options:
   --smtp-user <user>    SMTP username
   --smtp-pass <pass>    SMTP password
   --sender <email>      Sending address for e-mails
-""") & (when not defined(version): "" else: &"""
+""") & (when not defined(version): "" else: """
 
-Version: {version}
+Version: """ & version & """
 """)
 
 
