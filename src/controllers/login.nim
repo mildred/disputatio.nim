@@ -16,16 +16,17 @@ import ../views/[layout, login_form, login_totp, logout_form]
 
 import prologue
 
-proc send_email(server: SmtpConf, sender, recipient: string, msg: string) =
+proc send_email(server: SmtpConf, sender, recipient: string, code, msg: string) =
   if server.host == "":
     echo &"No SMTP configured, failed to send e-mail:\nMAIL FROM: {sender}\nRCPT TO: {recipient}\n{msg}"
     return
 
-  echo &"Connecting to {server.host}"
   let (smtp_server, smtp_port) = parse_addr_and_port(server.host, 25)
-
   let tls = server.tls == "tls" or (server.tls == "auto" and int(smtp_port) == 465)
   let starttls = (not tls) and server.tls != "none"
+  let tlsstr = if tls: "TLS" elif starttls: "plaintext (will STARTTLS)" else: "plaintext"
+  let authstr = if server.user != "": &", will authenticate as {server.user}" else: ""
+  echo &"Connecting to {smtp_server}:{smtp_port} over {tlsstr}{authstr}"
 
   var smtpConn = newSmtp(use_ssl = tls)
   smtpConn.connect(smtp_server, smtp_port)
@@ -35,9 +36,10 @@ proc send_email(server: SmtpConf, sender, recipient: string, msg: string) =
     smtpConn.auth(server.user, server.pass)
   defer: smtpConn.close()
   smtpConn.sendMail(sender, @[recipient], msg)
+  echo &"Sent e-mail successfully with code {code} to {recipient} (as {sender})"
 
 proc send_code(ctx: AppContext, email, code: string, url: uri.Uri) =
-  send_email(ctx.smtp, ctx.sender, email, $createMessage(
+  send_email(ctx.smtp, ctx.sender, email, code, $createMessage(
     &"Your {url.hostname} login code: {code}",
     &"To log-in to {url.hostname}, please click the following link:\n\n" &
     &"\t{url}\n\n" &
@@ -61,7 +63,7 @@ proc send_code_api(ctx: AppContext, email, code: string) =
     "The log-in code is:\n\n\t{code}\n\n-- \nPlease do not reply to this automated message.\n"
   ).replace("{code}", code).replace("{url}", link_url).replace("\r\n", "\n").replace("\n", "\r\n")
 
-  send_email(ctx.smtp, ctx.sender, email, $createMessage(
+  send_email(ctx.smtp, ctx.sender, email, code, $createMessage(
     email_subject, email_body,
     @[email], @[],
     @[
