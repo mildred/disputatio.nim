@@ -31,37 +31,41 @@ proc post*(ctx: Context) {.async, gcsafe.} =
   var db = initDatabase(":memory:")
   db.attach_database_master(ctx.db_file)
   db.exec("""
-    CREATE TEMP VIEW group_items AS
-    SELECT * FROM master.group_items WHERE group_type = 3;
+    CREATE TEMP VIEW group_item AS
+    SELECT * FROM master.group_item WHERE group_type = 3;
   """)
   db.exec("""
-    CREATE TEMP VIEW group_members AS
-    SELECT * FROM master.group_members WHERE group_item_id IN (SELECT id FROM group_items);
+    CREATE TEMP VIEW group_member AS
+    SELECT * FROM master.group_member WHERE group_item_id IN (SELECT id FROM group_item);
   """)
   db.exec("""
-    CREATE TEMP VIEW articles AS
-    SELECT * FROM master.articles WHERE group_id IN (SELECT id FROM group_items);
+    CREATE TEMP VIEW article AS
+    SELECT * FROM master.article WHERE group_id IN (SELECT id FROM group_item);
   """)
   db.exec("""
-    CREATE TEMP VIEW patches AS
-    SELECT * FROM master.patches WHERE id IN (SELECT patch_id FROM articles);
+    CREATE TEMP VIEW patch AS
+    SELECT * FROM master.patch WHERE id IN (SELECT patch_id FROM article);
   """)
   db.exec("""
-    CREATE TEMP VIEW patch_items AS
-    SELECT * FROM master.patch_items WHERE patch_id IN (SELECT patch_id FROM articles);
+    CREATE TEMP VIEW patch_item AS
+    SELECT * FROM master.patch_item WHERE patch_id IN (SELECT patch_id FROM article);
   """)
   db.exec("""
-    CREATE TEMP VIEW paragraphs AS
-    SELECT * FROM master.paragraphs WHERE id IN (SELECT paragraph_id FROM patch_items);
+    CREATE TEMP VIEW paragraph AS
+    SELECT * FROM master.paragraph WHERE id IN (SELECT paragraph_id FROM patch_item);
+  """)
+  db.exec("""
+    CREATE TEMP VIEW article_score AS
+    SELECT s.* FROM master.article_score s JOIN article a ON s.article_id = a.id;
   """)
   db.setAuthorizer do (req: AuthorizerRequest) -> AuthorizerResult:
     result = deny
     case req.caller
-    of "group_items", "group_members", "articles", "patches", "patch_items", "paragraphs":
+    of "group_item", "group_member", "article", "patch", "patch_item", "paragraph", "article_score":
+      # Allow most things from views we own
+      # We must not allow the user to create views or functions with those names
       case req.action_code
-      of select:
-        result = ok
-      of read:
+      of select, read, function:
         result = ok
       else:
         discard
@@ -73,7 +77,7 @@ proc post*(ctx: Context) {.async, gcsafe.} =
         result = ok
       of function:
         case req.function_name
-        of  "count", "min", "max", "group_concat",
+        of  "count", "min", "max", "sum", "avg", "group_concat",
             "printf", "lower", "upper",
             "row_number", "rank", "dense_rank":
           result = ok

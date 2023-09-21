@@ -403,6 +403,40 @@ proc migrate*(db: var Database): bool =
           ALTER TABLE new_articles RENAME TO articles;
         """)
         user_version = 8
+      of 8:
+        db.exec("ALTER TABLE users RENAME TO user;")
+        db.exec("ALTER TABLE user_emails RENAME TO user_email;")
+        db.exec("ALTER TABLE paragraphs RENAME TO paragraph;")
+        db.exec("ALTER TABLE patches RENAME TO patch;")
+        db.exec("ALTER TABLE patch_items RENAME TO patch_item;")
+        db.exec("ALTER TABLE subjects RENAME TO subject;")
+        db.exec("ALTER TABLE types RENAME TO type;")
+        db.exec("ALTER TABLE group_member_items RENAME TO group_member_item;")
+        db.exec("ALTER TABLE group_items RENAME TO group_item;")
+        db.exec("ALTER TABLE group_members RENAME TO group_member;")
+        db.exec("ALTER TABLE votes RENAME TO vote;")
+        db.exec("ALTER TABLE user_pods RENAME TO user_pod;")
+        db.exec("ALTER TABLE articles RENAME TO article;")
+        db.exec("""
+          CREATE VIEW article_score (group_guid, article_id, article_guid, score) AS
+          SELECT
+            g.root_guid AS group_guid, a.id AS article_id, a.guid AS article_guid,
+            g.moderation_default_score + SUM(
+              CASE WHEN m.weight < 0 THEN
+                m.weight
+              ELSE
+                MIN(MAX(v.vote, -1), 1) * m.weight
+              END
+            ) AS score
+          FROM
+            article a
+            JOIN vote v ON v.article_id = a.id
+            JOIN group_item g ON g.id = v.group_id
+            JOIN group_member m ON (m.group_item_id, m.local_id) = (g.id, v.member_local_user_id)
+          GROUP BY
+            g.root_guid, a.id, a.guid
+        """)
+        user_version = 9
       else:
         migrating = false
       if migrating:

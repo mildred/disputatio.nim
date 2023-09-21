@@ -54,31 +54,31 @@ proc get_email*(u: User, email_hash: string): Option[UserEmail] =
       return some(e)
 
 proc create_user_id(): tuple[id: int] {.importdb: """
-  INSERT INTO users DEFAULT VALUES RETURNING id
+  INSERT INTO user DEFAULT VALUES RETURNING id
 """ .}
 
 proc create_user_email(user_id: int, email_hash, totp_url: string, valid: bool) {.importdb: """
-  INSERT INTO user_emails (user_id, email_hash, totp_url, valid) VALUES($user_id, $email_hash, $totp_url, $valid)
+  INSERT INTO user_email (user_id, email_hash, totp_url, valid) VALUES($user_id, $email_hash, $totp_url, $valid)
 """ .}
 
 proc user_email_mark_valid*(email_hash: string, valid: bool = true) {.importdb: """
-  UPDATE user_emails SET valid = $valid WHERE email_hash = $email_hash
+  UPDATE user_email SET valid = $valid WHERE email_hash = $email_hash
 """ .}
 
 proc get_user_id(email_hash: string): Option[tuple[user_id: int]] {.importdb: """
-  SELECT user_id FROM user_emails WHERE email_hash = $email_hash
+  SELECT user_id FROM user_email WHERE email_hash = $email_hash
 """ .}
 
 iterator get_pods(user_id: int): tuple[id: int, pod_url: string, local_user_id: string] {.importdb: """
-  SELECT id, pod_url, local_user_id from user_pods WHERE user_id = $user_id
+  SELECT id, pod_url, local_user_id from user_pod WHERE user_id = $user_id
 """.} = discard
 
 iterator get_emails(user_id: int): tuple[email_hash: string, totp_url: string, valid: bool] {.importdb: """
-  SELECT email_hash, totp_url, valid FROM user_emails WHERE user_id = $user_id
+  SELECT email_hash, totp_url, valid FROM user_email WHERE user_id = $user_id
 """.} = discard
 
 proc ensure_user_in_pod*(user_id: int, pod_url: string, local_user_id: string) {.importdb: """
-  INSERT INTO user_pods (user_id, pod_url, local_user_id)
+  INSERT INTO user_pod (user_id, pod_url, local_user_id)
   VALUES ($user_id, $pod_url, $local_user_id)
   ON CONFLICT DO NOTHING
 """.}

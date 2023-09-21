@@ -68,9 +68,9 @@ proc set_group*(article: var Article, group: GroupItem, member: GroupMember) =
 
 proc last_article(user_id: int, name: string): Option[tuple[id: int, patch_id: int, patch_guid: string, user_id: int, name: string, reply_guid: string, reply_index: Option[int], author_group_id: int, author_group_guid: string, author_member_id: int, group_id: int, group_guid: string, group_member_id: int, kind: Option[string], timestamp: float]] {.importdb: """
   SELECT   a.id, a.patch_id, p.guid, a.user_id, s.name, a.reply_guid, a.reply_index, a.author_group_id, a.author_group_guid, a.author_member_id, a.group_id, a.group_guid, a.group_member_id, a.kind, a.timestamp
-  FROM     articles a
-           JOIN patches p ON a.patch_id = p.id
-           JOIN subjects s ON a.reply_guid = s.guid
+  FROM     article a
+           JOIN patch p ON a.patch_id = p.id
+           JOIN subject s ON a.reply_guid = s.guid
   WHERE    a.user_id = $user_id AND s.name = $name
   ORDER BY a.timestamp DESC
   LIMIT    1
@@ -102,11 +102,11 @@ iterator articles_for_group(group_root_guid: string): tuple[
     ) AS score,
     aa.id, aa.local_id, aa.weight, aa.nickname
   FROM
-    group_items g
-    JOIN votes v ON v.group_id = g.id
-    JOIN articles a ON a.id = v.article_id
-    JOIN group_members m ON (m.group_item_id, m.local_id) = (g.id, v.member_local_user_id)
-    JOIN group_members aa ON (aa.group_item_id, aa.local_id) = (a.author_group_id, a.author_member_id)
+    group_item g
+    JOIN vote v ON v.group_id = g.id
+    JOIN article a ON a.id = v.article_id
+    JOIN group_member m ON (m.group_item_id, m.local_id) = (g.id, v.member_local_user_id)
+    JOIN group_member aa ON (aa.group_item_id, aa.local_id) = (a.author_group_id, a.author_member_id)
   WHERE
     g.root_guid = $group_root_guid
   GROUP BY
@@ -123,7 +123,7 @@ iterator articles_for_group(group_root_guid: string): tuple[
 
 iterator paragraphs(patch_id: int): tuple[id: int, guid: string, style: string, text: string] {.importdb: """
   SELECT   p.id, p.guid, p.style, p.text
-  FROM     patch_items pi JOIN paragraphs p ON pi.paragraph_id = p.id
+  FROM     patch_item pi JOIN paragraph p ON pi.paragraph_id = p.id
   WHERE    pi.patch_id = $patch_id
   ORDER BY pi.rank ASC
 """.} = discard
@@ -161,32 +161,32 @@ proc get_julianday*(db: var Database): float =
   return julianday.time
 
 proc insert_subject*(guid, name: string) {.importdb: """
-  INSERT INTO subjects (guid, name)
+  INSERT INTO subject (guid, name)
   VALUES ($guid, $name)
   ON CONFLICT DO NOTHING
 """.}
 
 proc insert_paragraph(guid, style, text: string) {.importdb: """
-  INSERT INTO paragraphs (guid, style, text)
+  INSERT INTO paragraph (guid, style, text)
   VALUES ($guid, $style, $text)
   ON CONFLICT DO NOTHING
 """.}
 
 proc get_patch_id(guid: string): Option[tuple[id: int]] {.importdb: """
-  SELECT id FROM patches WHERE guid = $guid
+  SELECT id FROM patch WHERE guid = $guid
 """.}
 
 proc insert_patch(guid, parent_guid: string): tuple[id: int] {.importdb: """
-  INSERT INTO patches (guid, parent_id)
-  SELECT $guid, (SELECT id FROM patches WHERE guid = $parent_guid)
+  INSERT INTO patch (guid, parent_id)
+  SELECT $guid, (SELECT id FROM patch WHERE guid = $parent_guid)
   ON CONFLICT (guid) DO NOTHING
   RETURNING id
 """.}
 
 proc insert_patch_item(patch_guid, paragraph_guid: string, rank: int) {.importdb: """
-  INSERT INTO patch_items (patch_id, paragraph_id, rank)
-  SELECT (SELECT id FROM patches WHERE guid = $patch_guid),
-         (SELECT id FROM paragraphs WHERE guid = $paragraph_guid),
+  INSERT INTO patch_item (patch_id, paragraph_id, rank)
+  SELECT (SELECT id FROM patch WHERE guid = $patch_guid),
+         (SELECT id FROM paragraph WHERE guid = $paragraph_guid),
          $rank
 """.}
 
@@ -195,12 +195,12 @@ proc insert_article(
   author_group_id: int, author_group_guid: string, author_member_id: int,
   group_id: int, group_guid: string, group_member_id: int, kind: Option[string]
 ): tuple[id: int] {.importdb: """
-  INSERT INTO articles (
+  INSERT INTO article (
     guid, patch_id, patch_guid, user_id, reply_guid, reply_index, author_group_id,
     author_group_guid, author_member_id, group_id, group_guid, group_member_id,
     kind, timestamp)
   SELECT
-    $guid, (SELECT id FROM patches WHERE guid = $patch_guid), $patch_guid,
+    $guid, (SELECT id FROM patch WHERE guid = $patch_guid), $patch_guid,
     $user_id, $subject_guid, NULL, $author_group_id, $author_group_guid,
     IIF($author_member_id < 0, NULL, $author_member_id),
     $group_id, $group_guid,

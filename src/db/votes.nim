@@ -44,7 +44,7 @@ proc set_article*(vote: var Vote, article: Article, paragraph_rank: int = -1) =
     vote.paragraph_rank = some(paragraph_rank)
 
 proc insert_vote(guid: string, group_id: int, group_guid: string, member_local_user_id, article_id: int, article_guid: string, paragraph_rank: Option[int], vote: float): tuple[id: int] {.importdb: """
-  INSERT INTO votes (guid, group_id, group_guid, member_local_user_id, article_id, article_guid, paragraph_rank, vote)
+  INSERT INTO vote (guid, group_id, group_guid, member_local_user_id, article_id, article_guid, paragraph_rank, vote)
   VALUES ($guid, $group_id, $group_guid, $member_local_user_id, $article_id, $article_guid, $paragraph_rank, $vote)
   ON CONFLICT DO NOTHING
   RETURNING id

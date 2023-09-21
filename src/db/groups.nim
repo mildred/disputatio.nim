@@ -113,20 +113,20 @@ proc compute_new*(gi: var GroupItem) =
   if gi.parent_guid == "": gi.root_guid = gi.guid
 
 proc insert_group_item(guid, root_guid: string, parent_guid: Option[string], parent_id: Option[int], name, seed_userdata: string, group_type: int, others_members_weight: float, moderation_default_score: float): Option[tuple[id: int]] {.importdb: """
-  INSERT INTO group_items (guid, root_guid, parent_id, parent_guid, name, seed_userdata, group_type, others_members_weight, moderation_default_score)
+  INSERT INTO group_item (guid, root_guid, parent_id, parent_guid, name, seed_userdata, group_type, others_members_weight, moderation_default_score)
   VALUES ($guid, $root_guid, $parent_id, $parent_guid, $name, $seed_userdata, $group_type, $others_members_weight, $moderation_default_score)
   ON CONFLICT DO NOTHING
   RETURNING id
 """.}
 
 proc insert_group_member(local_id: int, group_item_id: int, nickname: string, weight: float, user_id: int): tuple[id: int] {.importdb: """
-  INSERT INTO group_members (local_id, obsolete, obsoleted_by, group_item_id, nickname, weight, user_id)
+  INSERT INTO group_member (local_id, obsolete, obsoleted_by, group_item_id, nickname, weight, user_id)
   VALUES ($local_id, FALSE, NULL, $group_item_id, $nickname, $weight, CASE WHEN $user_id <= 0 THEN NULL ELSE $user_id END)
   RETURNING id
 """.}
 
 proc insert_group_member_item(group_member_id: int, pod_url: string, local_user_id: string): tuple[id: int] {.importdb: """
-  INSERT INTO group_member_items (group_member_id, pod_url, local_user_id)
+  INSERT INTO group_member_item (group_member_id, pod_url, local_user_id)
   VALUES ($group_member_id, $pod_url, $local_user_id)
   RETURNING id
 """.}
@@ -145,9 +145,9 @@ proc select_latest_group_item_by_guid(guid: string): Option[tuple[
 ]] {.importdb: """
   SELECT  id, guid, root_guid, parent_id, parent_guid, group_type, name,
           seed_userdata, others_members_weight, moderation_default_score
-  FROM    group_items
+  FROM    group_item
   WHERE root_guid = $guid AND NOT EXISTS (
-    SELECT gi.id FROM group_items gi WHERE gi.parent_id = group_items.id
+    SELECT gi.id FROM group_item gi WHERE gi.parent_id = group_item.id
   )
 """.} = discard
 
@@ -165,10 +165,10 @@ iterator select_root_group_item_by_user_id(user_id: int): tuple[
 ] {.importdb: """
   SELECT  id, guid, root_guid, parent_id, parent_guid, group_type, name,
           seed_userdata, others_members_weight, moderation_default_score
-  FROM    group_items
+  FROM    group_item
   WHERE guid IN (
     SELECT root_guid
-    FROM group_items gi JOIN group_members gm ON gi.id = gm.group_item_id
+    FROM group_item gi JOIN group_member gm ON gi.id = gm.group_item_id
     WHERE NOT obsolete AND user_id = $user_id
   )
 """.} = discard
@@ -182,7 +182,7 @@ iterator select_group_members(group_id: int): tuple[
     user_id: int
 ] {.importdb: """
   SELECT id, local_id, group_item_id, weight, nickname, user_id
-  FROM group_members
+  FROM group_member
   WHERE group_item_id = $group_id
 """.} = discard
 
@@ -193,7 +193,7 @@ iterator select_group_member_items(group_member_id: int): tuple[
     local_user_id: string
 ] {.importdb: """
   SELECT id, group_member_id, pod_url, local_user_id
-  FROM group_member_items
+  FROM group_member_item
   WHERE group_member_id = $group_member_id
 """.} = discard
 

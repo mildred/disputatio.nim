@@ -1,56 +1,56 @@
 const schema* = @["""
-PRAGMA user_version = 8""", """
-CREATE TABLE users (
+PRAGMA user_version = 9""", """
+CREATE TABLE "user" (
             id            INTEGER PRIMARY KEY NOT NULL
           )""", """
-CREATE TABLE user_emails (
+CREATE TABLE "user_email" (
             user_id       INTEGER NOT NULL,
             email_hash    TEXT NOT NULL,
             totp_url      TEXT,
             valid         BOOLEAN DEFAULT FALSE,
             PRIMARY KEY (user_id, email_hash),
-            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (user_id) REFERENCES "user" (id),
             CONSTRAINT email_hash_unique UNIQUE (email_hash)
           )""", """
-CREATE TABLE paragraphs (
+CREATE TABLE "paragraph" (
             id          INTEGER PRIMARY KEY NOT NULL,
             guid        TEXT NOT NULL,
             text        TEXT NOT NULL,
             style       TEXT NOT NULL DEFAULT '',
             CONSTRAINT guid_unique UNIQUE (guid)
           )""", """
-CREATE TABLE patches (
+CREATE TABLE "patch" (
             id          INTEGER PRIMARY KEY NOT NULL,
             guid        TEXT NOT NULL,
             parent_id   INTEGER,
-            FOREIGN KEY (parent_id) REFERENCES patches (id),
+            FOREIGN KEY (parent_id) REFERENCES "patch" (id),
             CONSTRAINT guid_unique UNIQUE (guid)
           )""", """
-CREATE TABLE patch_items (
+CREATE TABLE "patch_item" (
             patch_id     INTEGER NOT NULL,
             paragraph_id INTEGER NOT NULL,
             rank         INTEGER NOT NULL,
             PRIMARY KEY (patch_id, paragraph_id),
-            FOREIGN KEY (patch_id) REFERENCES patches (id),
-            FOREIGN KEY (paragraph_id) REFERENCES paragraphs (id)
+            FOREIGN KEY (patch_id) REFERENCES "patch" (id),
+            FOREIGN KEY (paragraph_id) REFERENCES "paragraph" (id)
           )""", """
-CREATE TABLE subjects (
+CREATE TABLE "subject" (
             id          INTEGER PRIMARY KEY,
             guid        TEXT NOT NULL,
             name        TEXT NOT NULL,
             CONSTRAINT guid_unique UNIQUE (guid)
           )""", """
-CREATE TABLE types (
+CREATE TABLE "type" (
             type        TEXT PRIMARY KEY NOT NULL
           )""", """
-CREATE TABLE group_member_items (
+CREATE TABLE "group_member_item" (
             id                 INTEGER PRIMARY KEY NOT NULL,
             group_member_id    INTEGER NOT NULL,
             pod_url            TEXT,
             local_user_id      TEXT,
-            FOREIGN KEY (group_member_id) REFERENCES group_members (id)
+            FOREIGN KEY (group_member_id) REFERENCES "group_member" (id)
           )""", """
-CREATE TABLE group_items (
+CREATE TABLE "group_item" (
             id                       INTEGER PRIMARY KEY NOT NULL,
             guid                     TEXT NOT NULL,
             root_guid                TEXT NOT NULL,             -- group root item
@@ -66,12 +66,12 @@ CREATE TABLE group_items (
                         -- 3: public, anyone can read and group is discoverable
             moderation_default_score REAL DEFAULT 0,            -- score for unlisted member's articles
 
-            FOREIGN KEY (root_guid) REFERENCES group_items (guid),
-            FOREIGN KEY (parent_guid) REFERENCES group_items (guid),
-            FOREIGN KEY (parent_id) REFERENCES group_items (id),
+            FOREIGN KEY (root_guid) REFERENCES "group_item" (guid),
+            FOREIGN KEY (parent_guid) REFERENCES "group_item" (guid),
+            FOREIGN KEY (parent_id) REFERENCES "group_item" (id),
             CONSTRAINT guid_unique UNIQUE (guid)
           )""", """
-CREATE TABLE group_members (
+CREATE TABLE "group_member" (
             id                 INTEGER PRIMARY KEY NOT NULL,
             local_id           INTEGER NOT NULL,        -- unique id within the group
             obsolete           BOOLEAN DEFAULT FALSE,   -- is the member obsolete (private data to pod)
@@ -82,11 +82,11 @@ CREATE TABLE group_members (
             user_id            INTEGER,                 -- user id for instance
 
             CONSTRAINT local_id_unique UNIQUE (local_id, group_item_id),
-            FOREIGN KEY (obsoleted_by) REFERENCES group_members (id),
-            FOREIGN KEY (group_item_id) REFERENCES group_items (id),
-            FOREIGN KEY (user_id) REFERENCES users (id)
+            FOREIGN KEY (obsoleted_by) REFERENCES "group_member" (id),
+            FOREIGN KEY (group_item_id) REFERENCES "group_item" (id),
+            FOREIGN KEY (user_id) REFERENCES "user" (id)
           )""", """
-CREATE TABLE votes (
+CREATE TABLE "vote" (
             id                      INTEGER PRIMARY KEY NOT NULL,
             guid                    TEXT NOT NULL,
             group_id                INTEGER NOT NULL,
@@ -98,17 +98,17 @@ CREATE TABLE votes (
             vote                    REAL NOT NULL,
             CONSTRAINT guid_unique UNIQUE (guid)
             FOREIGN KEY (group_id, group_guid) REFERENCES groups (id, guid),
-            FOREIGN KEY (article_id, article_guid) REFERENCES articles (id, guid)
+            FOREIGN KEY (article_id, article_guid) REFERENCES "article" (id, guid)
           )""", """
-CREATE TABLE user_pods (
+CREATE TABLE "user_pod" (
             id            INTEGER PRIMARY KEY NOT NULL,
             user_id       INTEGER NOT NULL,
             pod_url       TEXT NOT NULL,        -- public pod URL
             local_user_id TEXT NOT NULL,        -- public user id scoped by pod URL
             CONSTRAINT user_id_pod_url_unique UNIQUE (user_id, pod_url),
-            FOREIGN KEY (user_id) REFERENCES users (id)
+            FOREIGN KEY (user_id) REFERENCES "user" (id)
           )""", """
-CREATE TABLE "articles" (
+CREATE TABLE "article" (
             id                  INTEGER PRIMARY KEY NOT NULL,
             guid                TEXT NOT NULL,
             patch_id            INTEGER NOT NULL,
@@ -139,13 +139,30 @@ CREATE TABLE "articles" (
             timestamp           REAL NOT NULL DEFAULT (julianday('now')),
 
             CONSTRAINT guid_unique UNIQUE (guid)
-            FOREIGN KEY (mod_article_id) REFERENCES articles (id),
-            FOREIGN KEY (mod_article_guid) REFERENCES articles (guid),
-            FOREIGN KEY (patch_id) REFERENCES patches (id),
-            FOREIGN KEY (user_id) REFERENCES users (id),
-            FOREIGN KEY (author_group_id) REFERENCES group_items (id),
-            FOREIGN KEY (author_group_guid) REFERENCES group_items (guid),
-            FOREIGN KEY (group_id) REFERENCES group_items (id),
-            FOREIGN KEY (group_guid) REFERENCES group_items (guid)
-          )"""]
+            FOREIGN KEY (mod_article_id) REFERENCES "article" (id),
+            FOREIGN KEY (mod_article_guid) REFERENCES "article" (guid),
+            FOREIGN KEY (patch_id) REFERENCES "patch" (id),
+            FOREIGN KEY (user_id) REFERENCES "user" (id),
+            FOREIGN KEY (author_group_id) REFERENCES "group_item" (id),
+            FOREIGN KEY (author_group_guid) REFERENCES "group_item" (guid),
+            FOREIGN KEY (group_id) REFERENCES "group_item" (id),
+            FOREIGN KEY (group_guid) REFERENCES "group_item" (guid)
+          )""", """
+CREATE VIEW article_score (group_guid, article_id, article_guid, score) AS
+          SELECT
+            g.root_guid AS group_guid, a.id AS article_id, a.guid AS article_guid,
+            g.moderation_default_score + SUM(
+              CASE WHEN m.weight < 0 THEN
+                m.weight
+              ELSE
+                MIN(MAX(v.vote, -1), 1) * m.weight
+              END
+            ) AS score
+          FROM
+            article a
+            JOIN vote v ON v.article_id = a.id
+            JOIN group_item g ON g.id = v.group_id
+            JOIN group_member m ON (m.group_item_id, m.local_id) = (g.id, v.member_local_user_id)
+          GROUP BY
+            g.root_guid, a.id, a.guid"""]
 
