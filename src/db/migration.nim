@@ -437,6 +437,62 @@ proc migrate*(db: var Database): bool =
             g.root_guid, a.id, a.guid
         """)
         user_version = 9
+      of 9:
+        db.exec("""
+          CREATE TABLE IF NOT EXISTS new_vote (
+            id                      INTEGER PRIMARY KEY NOT NULL,
+            guid                    TEXT NOT NULL,
+            group_id                INTEGER NOT NULL,
+            group_guid              TEXT NOT NULL,
+            member_id               INTEGER NOT NULL,
+            article_id              INTEGER NOT NULL,
+            article_guid            TEXT NOT NULL,
+            paragraph_rank          INTEGER,
+            vote                    REAL NOT NULL,
+            timestamp               REAL NOT NULL DEFAULT (julianday('now')),
+            CONSTRAINT guid_unique UNIQUE (guid)
+            FOREIGN KEY (group_id, group_guid) REFERENCES group_item (id, guid),
+            FOREIGN KEY (article_id, article_guid) REFERENCES article (id, guid)
+          );
+        """)
+        # Drop all votes
+        # db.exec("""
+        #   INSERT INTO new_vote
+        #   SELECT  id, '' guid, group_id, group_guid, member_local_user_id,
+        #           article_id, article_guid, paragraph_rank, vote,
+        #           julianday('now') timestamp
+        #   FROM vote;
+        # """)
+        db.exec("""
+          DROP VIEW article_score;
+        """)
+        db.exec("""
+          DROP TABLE vote;
+        """)
+        db.exec("""
+          ALTER TABLE new_vote RENAME TO vote;
+        """)
+        db.exec("""
+          CREATE VIEW article_score (group_guid, article_id, article_guid, score) AS
+          WITH
+            votes_incl_default AS (
+              SELECT  v.article_id, v.article_guid, g.root_guid, v.member_id,
+                      IIF(m.weight < 0, 1, MIN(MAX(SUM(v.vote), -1), 1)) vote, m.weight
+              FROM    vote v
+                      JOIN group_item g ON v.group_id = g.id
+                      JOIN group_member m ON (m.group_item_id, m.local_id) = (v.group_id, v.member_id)
+              GROUP BY v.article_id, v.article_guid, g.root_guid, v.member_id, m.weight
+              UNION ALL
+              SELECT  a.id article_id, a.guid article_guid, g.root_guid, 0 member_id,
+                      1 vote, g.moderation_default_score weight
+              FROM    article a JOIN group_item g ON a.group_id = g.id
+            )
+          SELECT  v.root_guid, v.article_id, v.article_guid,
+                  SUM(v.vote * v.weight) AS score
+          FROM    votes_incl_default v
+          GROUP BY v.root_guid, v.article_id, v.article_guid
+        """)
+        user_version = 10
       else:
         migrating = false
       if migrating:

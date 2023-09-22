@@ -5,6 +5,7 @@ import easy_sqlite3
 
 import ./guid
 import ./groups
+import ./utils
 
 type
   Subject* = tuple
@@ -153,12 +154,6 @@ proc get_last_article*(db: var Database, user_id: int, name: string): Option[Art
     res.paragraphs.add(p)
 
   result = some(res)
-
-proc get_julianday_sql(): tuple[time: float] {.importdb: "SELECT julianday('now')".}
-
-proc get_julianday*(db: var Database): float =
-  let julianday = db.get_julianday_sql()
-  return julianday.time
 
 proc insert_subject*(guid, name: string) {.importdb: """
   INSERT INTO subject (guid, name)

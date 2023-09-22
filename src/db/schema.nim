@@ -1,5 +1,5 @@
 const schema* = @["""
-PRAGMA user_version = 9""", """
+PRAGMA user_version = 10""", """
 CREATE TABLE "user" (
             id            INTEGER PRIMARY KEY NOT NULL
           )""", """
@@ -86,20 +86,6 @@ CREATE TABLE "group_member" (
             FOREIGN KEY (group_item_id) REFERENCES "group_item" (id),
             FOREIGN KEY (user_id) REFERENCES "user" (id)
           )""", """
-CREATE TABLE "vote" (
-            id                      INTEGER PRIMARY KEY NOT NULL,
-            guid                    TEXT NOT NULL,
-            group_id                INTEGER NOT NULL,
-            group_guid              TEXT NOT NULL,
-            member_local_user_id    INTEGER NOT NULL,
-            article_id              INTEGER NOT NULL,
-            article_guid            TEXT NOT NULL,
-            paragraph_rank          INTEGER,
-            vote                    REAL NOT NULL,
-            CONSTRAINT guid_unique UNIQUE (guid)
-            FOREIGN KEY (group_id, group_guid) REFERENCES groups (id, guid),
-            FOREIGN KEY (article_id, article_guid) REFERENCES "article" (id, guid)
-          )""", """
 CREATE TABLE "user_pod" (
             id            INTEGER PRIMARY KEY NOT NULL,
             user_id       INTEGER NOT NULL,
@@ -148,21 +134,37 @@ CREATE TABLE "article" (
             FOREIGN KEY (group_id) REFERENCES "group_item" (id),
             FOREIGN KEY (group_guid) REFERENCES "group_item" (guid)
           )""", """
+CREATE TABLE "vote" (
+            id                      INTEGER PRIMARY KEY NOT NULL,
+            guid                    TEXT NOT NULL,
+            group_id                INTEGER NOT NULL,
+            group_guid              TEXT NOT NULL,
+            member_id               INTEGER NOT NULL,
+            article_id              INTEGER NOT NULL,
+            article_guid            TEXT NOT NULL,
+            paragraph_rank          INTEGER,
+            vote                    REAL NOT NULL,
+            timestamp               REAL NOT NULL DEFAULT (julianday('now')),
+            CONSTRAINT guid_unique UNIQUE (guid)
+            FOREIGN KEY (group_id, group_guid) REFERENCES group_item (id, guid),
+            FOREIGN KEY (article_id, article_guid) REFERENCES article (id, guid)
+          )""", """
 CREATE VIEW article_score (group_guid, article_id, article_guid, score) AS
-          SELECT
-            g.root_guid AS group_guid, a.id AS article_id, a.guid AS article_guid,
-            g.moderation_default_score + SUM(
-              CASE WHEN m.weight < 0 THEN
-                m.weight
-              ELSE
-                MIN(MAX(v.vote, -1), 1) * m.weight
-              END
-            ) AS score
-          FROM
-            article a
-            JOIN vote v ON v.article_id = a.id
-            JOIN group_item g ON g.id = v.group_id
-            JOIN group_member m ON (m.group_item_id, m.local_id) = (g.id, v.member_local_user_id)
-          GROUP BY
-            g.root_guid, a.id, a.guid"""]
+          WITH
+            votes_incl_default AS (
+              SELECT  v.article_id, v.article_guid, g.root_guid, v.member_id,
+                      IIF(m.weight < 0, 1, MIN(MAX(SUM(v.vote), -1), 1)) vote, m.weight
+              FROM    vote v
+                      JOIN group_item g ON v.group_id = g.id
+                      JOIN group_member m ON (m.group_item_id, m.local_id) = (v.group_id, v.member_id)
+              GROUP BY v.article_id, v.article_guid, g.root_guid, v.member_id, m.weight
+              UNION ALL
+              SELECT  a.id article_id, a.guid article_guid, g.root_guid, 0 member_id,
+                      1 vote, g.moderation_default_score weight
+              FROM    article a JOIN group_item g ON a.group_id = g.id
+            )
+          SELECT  v.root_guid, v.article_id, v.article_guid,
+                  SUM(v.vote * v.weight) AS score
+          FROM    votes_incl_default v
+          GROUP BY v.root_guid, v.article_id, v.article_guid"""]
 

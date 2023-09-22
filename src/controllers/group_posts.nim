@@ -5,15 +5,19 @@ import prologue
 import ./groups
 import ./errors
 import ../db/users
-import ../db/articles
+import ../db/groups
 import ../db/votes
+import ../db/articles
+import ../db/utils
 import ../context
 import ../convert_articles
 
 proc create*(ctx: Context) {.async, gcsafe.} =
   let db = AppContext(ctx).db
-  # let current_user = db[].get_user(hash_email(ctx.session.getOrDefault("email", "")))
-  let (g, member) = ctx.get_group()
+  let group_guid = ctx.getPathParams("groupguid", "")
+  let current_user = db[].get_user(hash_email(ctx.session.getOrDefault("email", "")))
+
+  let (g, member) = db.get_group_auth(group_guid, current_user)
 
   if g.is_none(): return ctx.go404()
   if member.is_none(): return ctx.go403()
@@ -43,6 +47,6 @@ proc create*(ctx: Context) {.async, gcsafe.} =
   vote.set_article(article)
   vote.vote = 1.0
   vote.guid = vote.compute_hash()
-  vote.id = db[].save_new(vote)
+  vote.id = db[].save_new(vote).get(-1)
 
   resp "", Http201

@@ -91,27 +91,12 @@ proc create*(ctx: Context) {.async, gcsafe.} =
     db[].save_new(gi[], group_member = member_id)
     resp redirect(&"/@{gi.root_guid}/", code = Http303)
 
-proc get_group*(ctx: Context): tuple[group: Option[GroupItem], member: Option[GroupMember]] {.gcsafe.} =
-  let db = AppContext(ctx).db
-  let group_guid = ctx.getPathParams("groupguid", "")
-  let current_user = db[].get_user(hash_email(ctx.session.getOrDefault("email", "")))
-
-  var g = db[].get_group(group_guid)
-  var member: Option[GroupMember]
-
-  if g.is_some() and current_user.is_some:
-    member = g.get.find_current_user(current_user.get.id)
-    if g.get.group_type == 0 and member.is_none():
-      g = none(GroupItem)
-
-  result = (g, member)
-
 proc join*(ctx: Context) {.async, gcsafe.} =
   let db = AppContext(ctx).db
   let group_guid = ctx.getPathParams("groupguid", "")
   let current_user = db[].get_user(hash_email(ctx.session.getOrDefault("email", "")))
 
-  let (g, member) = ctx.get_group()
+  let (g, member) = db.get_group_auth(group_guid, current_user)
 
   if g.is_none(): return ctx.go404()
 
@@ -147,7 +132,10 @@ proc join*(ctx: Context) {.async, gcsafe.} =
 
 proc show*(ctx: Context) {.async, gcsafe.} =
   let db = AppContext(ctx).db
-  let (g, member) = ctx.get_group()
+  let group_guid = ctx.getPathParams("groupguid", "")
+  let current_user = db[].get_user(hash_email(ctx.session.getOrDefault("email", "")))
+
+  let (g, member) = db.get_group_auth(group_guid, current_user)
 
   if g.is_none(): return ctx.go404()
 
@@ -157,7 +145,10 @@ proc show*(ctx: Context) {.async, gcsafe.} =
 
 proc json_info*(ctx: Context) {.async, gcsafe.} =
   let db = AppContext(ctx).db
-  let (g, member) = ctx.get_group()
+  let group_guid = ctx.getPathParams("groupguid", "")
+  let current_user = db[].get_user(hash_email(ctx.session.getOrDefault("email", "")))
+
+  let (g, member) = db.get_group_auth(group_guid, current_user)
 
   if g.is_none():
     resp json_response(%*{

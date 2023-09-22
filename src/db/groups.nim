@@ -5,6 +5,7 @@ import std/algorithm
 import easy_sqlite3
 
 import ./guid
+import ./users
 
 type
   GroupMemberItem* = tuple
@@ -484,6 +485,18 @@ proc find_current_user*(g: GroupItem, user_id: int): Option[GroupMember] =
   for member in g.members:
     if member.user_id == user_id:
       return some(member)
+
+proc get_group_auth*(db: ref Database, guid: string, user: Option[User]): tuple[group: Option[GroupItem], member: Option[GroupMember]] =
+  var g = db[].get_group(guid)
+  var member: Option[GroupMember]
+
+  if g.is_some() and user.is_some:
+    member = g.get.find_current_user(user.get.id)
+
+  if g.is_some() and g.get.group_type == 0 and member.is_none():
+    g = none(GroupItem)
+
+  return (group: g, member: member)
 
 proc allocate_member_id*(g: GroupItem): int =
   result = 1

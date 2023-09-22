@@ -4,7 +4,7 @@ import std/uri
 import prologue
 import jwt
 
-import ./controllers/[login,articles,errors,assets,groups,group_posts,home,oauth,api]
+import ./controllers/[login,articles,errors,assets,groups,group_posts,home,oauth,api,votes]
 import ./context
 
 proc setApi*(): HandlerAsync =
@@ -34,6 +34,7 @@ proc init_routes*(app: Prologue) =
   app.addRoute(re"^/.well-known/disputatio/(g:|@)(?P<groupguid>[^/]+)/info/$", groups.json_info, HttpGet, middlewares = @[setApi()])
   app.addRoute(re"^/.well-known/disputatio/(g:|@)(?P<groupguid>[^/]+)/join/$", groups.join, HttpPost, middlewares = @[setApi(), ensureLoggedIn()])
   app.addRoute(re"^/.well-known/disputatio/(g:|@)(?P<groupguid>[^/]+)/posts/$", group_posts.create, HttpPost, middlewares = @[setApi(), ensureLoggedIn()])
+  app.addRoute(re"^/.well-known/disputatio/(g:|@)(?P<groupguid>[^/]+)/(a:)(?P<articleguid>[^/]+)/vote/$", votes.api_vote, HttpPost, middlewares = @[setApi(), ensureLoggedIn()])
   app.addRoute("/", home.index, HttpGet, middlewares = @[ensureLoggedIn()])
   app.addRoute("/logout", login.get_logout, HttpGet)
   app.addRoute("/logout", login.post_logout, HttpPost)
