@@ -1,4 +1,5 @@
 import std/json
+import std/strformat
 import std/options
 import std/algorithm
 import easy_sqlite3
@@ -56,26 +57,41 @@ type
     invalid_pod_removal:            int
     invalid_pod_addition:           int
 
-proc validate_group_item*(item: GroupItem, parent: Option[GroupItem] = none(GroupItem), member_id: int = 0, from_pod: string = ""): Option[GroupValidationError] =
-  var res: GroupValidationError
+proc validate_group_item*(item: GroupItem, parent: Option[GroupItem] = none(GroupItem), member_id: int = 0, from_pod: string = ""): Option[ref GroupValidationError] =
+  var res: ref GroupValidationError
+  proc err(msg: string): ref GroupValidationError =
+    if res == nil: res = newException(GroupValidationError, &"Failed to validate GroupItem: {msg}")
+    else: res.msg = &"{res.msg}, {msg}"
+    return res
 
-  if (parent.is_some and item.parent_guid != parent.get.guid) or
-     (parent.is_none and item.parent_guid != ""):
-    res.parent_guid_mismatch = true
-    result = some(res)
+  if parent.is_some:
+    if item.parent_guid != parent.get.guid:
+      result = some(err(&"parent guid ({item.parent_guid}) should be the guid of the parent ({parent.get.guid})"))
+      res.parent_guid_mismatch = true
 
-  if (parent.is_some and parent.get.parent_guid == "" and item.root_guid != parent.get.guid) or
-     (parent.is_some and parent.get.parent_guid != "" and item.root_guid != parent.get.root_guid) or
-     (parent.is_none and item.root_guid != ""):
-    res.root_guid_mismatch = true
-    result = some(res)
+    if parent.get.parent_guid == "" and item.root_guid != parent.get.guid:
+      result = some(err(&"root guid ({item.root_guid}) should be parent guid ({parent.get.guid})"))
+      res.root_guid_mismatch = true
+    elif parent.get.parent_guid != "" and item.root_guid != parent.get.root_guid:
+      result = some(err(&"root guid ({item.root_guid}) should be parent root guid ({parent.get.root_guid})"))
+      res.root_guid_mismatch = true
+  else:
+    if parent.is_none and item.parent_guid != "":
+      result = some(err(&"parent guid should not be set for root group item"))
+      res.parent_guid_mismatch = true
+
+    # root_guid is set even for root items for database convenience, but not
+    # counted in the canonical payload
+    # if parent.is_none and item.root_guid != "":
+    #   result = some(err(&"root guid should not be set for root group item"))
+    #   res.root_guid_mismatch = true
 
   var new_max_weight: float
   var new_max_weight_set = false
   for i, m in item.members:
     if m.local_id != i + 1:
+      result = some(err(&"invalid member ordering for member {m.local_id} et position {i+1}"))
       res.invalid_member_order = i + 1
-      result = some(res)
     if not new_max_weight_set or m.weight > new_max_weight:
       new_max_weight = m.weight
       new_max_weight_set = true
@@ -88,17 +104,12 @@ proc validate_group_item*(item: GroupItem, parent: Option[GroupItem] = none(Grou
 
   var member_found = (member_id > 0 and member_id <= len(item.members))
   if not member_found:
+    result = some(err(&"only members can update a group, {member_id} is not part of the group"))
     res.non_member_update = true
-    result = some(res)
     return
 
   let member = item.members[member_id - 1]
   assert member.local_id == member_id
-
-  if not member_found:
-    res.non_member_update = true
-    result = some(res)
-    return
 
   var old_max_weight: float
   var old_max_weight_set = false
@@ -109,17 +120,17 @@ proc validate_group_item*(item: GroupItem, parent: Option[GroupItem] = none(Grou
 
   var old_member: Option[GroupMember] = none(GroupMember)
   var member_weight = parent.get.others_members_weight
-  if member_id - 1 <= parent.get.members.len:
+  if member_id - 1 < parent.get.members.len:
     old_member = some(parent.get.members[member_id - 1])
     member_weight = old_member.get.weight
 
   if old_member.is_none and parent.get.group_type == 0:
+    result = some(err(&"private groups cannot be joined without invitation"))
     res.invalid_self_join = true
-    result = some(res)
 
   if old_member.is_none and member.weight > parent.get.others_members_weight:
+    result = some(err(&"cannot join group with weight {member.weight} higher than {parent.get.others_members_weight}"))
     res.invalid_self_join_weight = true
-    result = some(res)
 
   let owner = (member_weight == old_max_weight)
 
@@ -132,8 +143,8 @@ proc validate_group_item*(item: GroupItem, parent: Option[GroupItem] = none(Grou
       if m0.weight == old_max_weight and m1.weight != new_max_weight:
         # All owners in previous blocks must continue to be owner (but new
         # owners can appear)
+        result = some(err(&"owner weight update would demote owner {i+1}"))
         res.invalid_owner_weight_update = true
-        result = some(res)
 
   if from_pod != "":
     var pod_found = false
@@ -142,29 +153,29 @@ proc validate_group_item*(item: GroupItem, parent: Option[GroupItem] = none(Grou
         pod_found = true
         break
     if not pod_found:
+      result = some(err(&"invalid external update from extraneous pod"))
       res.non_authorized_pod_update = true
-      result = some(res)
 
   if parent.get.group_type != item.group_type:
+    result = some(err(&"cannot change group type"))
     res.group_type_mismatch = true
-    result = some(res)
 
   if parent.get.name != item.name and not owner:
+    result = some(err(&"only the owner can change the group title"))
     res.non_owner_title_change = true
-    result = some(res)
 
   if parent.get.others_members_weight != item.others_members_weight and
      item.others_members_weight > member_weight:
+    result = some(err(&"new member weight ({item.others_members_weight}) cannot be changed to higher than {member_weight}"))
     res.invalid_others_weight = true
-    result = some(res)
 
   if parent.get.moderation_default_score != item.moderation_default_score and not owner:
+    result = some(err(&"only owner can change the default moderation score"))
     res.non_owner_default_score_change = true
-    result = some(res)
 
   if parent.get.members.len > item.members.len:
+    result = some(err(&"members cannot be removed"))
     res.invalid_remove_member = true
-    result = some(res)
 
   for i, m1 in item.members:
     let self = (m1.local_id == member_id)
@@ -182,20 +193,20 @@ proc validate_group_item*(item: GroupItem, parent: Option[GroupItem] = none(Grou
       elif m0.weight > m1.weight: # weight decrease
         if not self and m1.weight >= member_weight: 
           # only allowed for self and members with lower weight
+          result = some(err(&"cannot decrease other member id={i+1} weight if their weight {m0.weight} is higher than ours {member_weight}"))
           res.invalid_member_weight_decrease = i + 1
-          result = some(res)
 
       elif m0.weight < m1.weight: # weight increase
         if self or m1.weight > member_weight:
           # not allowed for self, but allowed for other members with less weight
+          result = some(err(&"cannot increase member id={i+1} weight if the new weight {m1.weight} is higher than ours {member_weight}"))
           res.invalid_member_weight_increase = i + 1
-          result = some(res)
 
-      if m0.nickname != m1.nickname and not self and m1.weight >= member.weight:
+      if m0.nickname != m1.nickname and not self and m1.weight >= member_weight:
         # Nickname changed is only allowed for oneself and members with lower
         # weight
+        result = some(err(&"cannot change other member id={i+1} nickname unless their weight {m1.weight} is less than ours {member_weight}"))
         res.invalid_member_nickname_change = i + 1
-        result = some(res)
 
       for itm0 in m0.items:
         var removed = true
@@ -206,21 +217,21 @@ proc validate_group_item*(item: GroupItem, parent: Option[GroupItem] = none(Grou
         if removed and not self and m1.weight >= member_weight:
           # Pod removal should be performed by self or strictly higher
           # priviledged member
+          result = some(err(&"cannot remove pod for member id={i+1} nickname unless their weight {m1.weight} is less than ours {member_weight}"))
           res.invalid_pod_removal = i + 1
-          result = some(res)
     else:
       # New member
       if m1.weight > member_weight:
+        result = some(err(&"cannot invite member id={i+1} with weight {m1.weight} higher than ours {member_weight}"))
         res.invalid_new_member_weight = i + 1
-        result = some(res)
 
     var last_pod_url = ""
     var last_pod_id = ""
-    for itm in m1.items:
+    for j, itm in m1.items:
       if (itm.pod_url  < last_pod_url) or
          (itm.pod_url == last_pod_url and itm.local_user_id <= last_pod_id):
+        result = some(err(&"pods for member id={i+1} must be ordered, failed at index {j}"))
         res.invalid_member_item_ordering = i + 1
-        result = some(res)
 
       last_pod_url = itm.pod_url
       last_pod_id  = itm.local_user_id
@@ -239,8 +250,8 @@ proc validate_group_item*(item: GroupItem, parent: Option[GroupItem] = none(Grou
           break
 
       if added and not self:
+        result = some(err(&"cannot add pod for other member id={i+1}"))
         res.invalid_pod_addition = i + 1
-        result = some(res)
 
 
 proc cmp(a, b: GroupMemberItem): int =
@@ -291,10 +302,9 @@ proc to_json_node*(gi: GroupItem): JsonNode =
     "s": gi.moderation_default_score,
     "m": gi.members.to_json_node()
   }
-  if gi.root_guid != "" and gi.root_guid != gi.guid:
-    result["root"] = %*gi.root_guid
   if gi.parent_guid != "":
     result["parent"] = %*gi.parent_guid
+    result["root"]   = %*gi.root_guid
 
 proc from_json*(t: typedesc[GroupItem], j: JsonNode): GroupItem =
   assert j["t"].get_str == "group-item"
@@ -406,7 +416,7 @@ iterator select_group_member_items(group_member_id: int): tuple[
   WHERE group_member_id = $group_member_id
 """.} = discard
 
-proc save_new*(db: var Database, gi: GroupItem) =
+proc save_new*(db: var Database, gi: GroupItem, parent: Option[GroupItem] = none(GroupItem), group_member: int = 0) =
   db.transaction:
     assert(gi.guid != "")
     for member in gi.members:
@@ -422,6 +432,10 @@ proc save_new*(db: var Database, gi: GroupItem) =
       assert(gi.parent_guid != "", "group item must have a parent guid")
       parent_id = some(gi.parent_id)
       parent_guid = some(gi.parent_guid)
+
+    let err = validate_group_item(gi, parent, group_member)
+    if err.is_some:
+      raise err.get
 
     let group = db.insert_group_item(gi.guid, root_guid, parent_guid, parent_id, gi.name, gi.seed_userdata, gi.group_type, gi.others_members_weight, gi.moderation_default_score)
     if group.is_some():

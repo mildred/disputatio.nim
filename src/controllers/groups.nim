@@ -67,26 +67,28 @@ proc create*(ctx: Context) {.async, gcsafe.} =
     i.local_user_id = p.local_user_id
     m.items.add(i)
 
+  var member_id: int = 0
   if ctx.getFormParamsOption("empty_group").is_none():
     gi[].members.add(m)
+    member_id = m.local_id
 
   if preset == "identity":
     # Private identity : note to self
     gi[].group_type = 0
     gi[].compute_new()
-    db[].save_new(gi[])
+    db[].save_new(gi[], group_member = member_id)
 
     # Public identity where our pod coordinates can be found and a place for
     # public messages (public blog)
     gi[].group_type = 3
     gi[].compute_new()
-    db[].save_new(gi[])
+    db[].save_new(gi[], group_member = member_id)
 
     resp redirect(&"/", code = Http303)
 
   else:
     gi[].compute_new()
-    db[].save_new(gi[])
+    db[].save_new(gi[], group_member = member_id)
     resp redirect(&"/@{gi.root_guid}/", code = Http303)
 
 proc get_group*(ctx: Context): tuple[group: Option[GroupItem], member: Option[GroupMember]] {.gcsafe.} =
@@ -133,7 +135,7 @@ proc join*(ctx: Context) {.async, gcsafe.} =
   gi.parent_id = g.get.id
   gi.parent_guid = g.get.guid
   gi.compute_new()
-  db[].save_new(gi)
+  db[].save_new(gi, g, group_member = m.local_id)
 
   if AppContext(ctx).api:
     resp json_response(%*{
