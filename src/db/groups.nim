@@ -34,6 +34,215 @@ type
     moderation_default_score: float
     members: seq[GroupMember]
 
+  GroupValidationError* = object of CatchableError
+    parent_guid_mismatch:           bool
+    root_guid_mismatch:             bool
+    invalid_member_order:           int
+    invalid_self_join:              bool
+    invalid_self_join_weight:       bool
+    invalid_owner_weight_update:    bool
+    non_authorized_pod_update:      bool
+    group_type_mismatch:            bool
+    non_member_update:              bool
+    non_owner_title_change:         bool
+    invalid_others_weight:          bool
+    non_owner_default_score_change: bool
+    invalid_remove_member:          bool
+    invalid_member_nickname_change: int
+    invalid_member_weight_decrease: int
+    invalid_member_weight_increase: int
+    invalid_new_member_weight:      int
+    invalid_member_item_ordering:   int
+    invalid_pod_removal:            int
+    invalid_pod_addition:           int
+
+proc validate_group_item*(item: GroupItem, parent: Option[GroupItem] = none(GroupItem), member_id: int = 0, from_pod: string = ""): Option[GroupValidationError] =
+  var res: GroupValidationError
+
+  if (parent.is_some and item.parent_guid != parent.get.guid) or
+     (parent.is_none and item.parent_guid != ""):
+    res.parent_guid_mismatch = true
+    result = some(res)
+
+  if (parent.is_some and parent.get.parent_guid == "" and item.root_guid != parent.get.guid) or
+     (parent.is_some and parent.get.parent_guid != "" and item.root_guid != parent.get.root_guid) or
+     (parent.is_none and item.root_guid != ""):
+    res.root_guid_mismatch = true
+    result = some(res)
+
+  var new_max_weight: float
+  var new_max_weight_set = false
+  for i, m in item.members:
+    if m.local_id != i + 1:
+      res.invalid_member_order = i + 1
+      result = some(res)
+    if not new_max_weight_set or m.weight > new_max_weight:
+      new_max_weight = m.weight
+      new_max_weight_set = true
+
+  if parent.is_none:
+    return
+
+  # Past this point, we only check updates to the group item and if is allowed
+  # within the context of the parent item
+
+  var member_found = (member_id > 0 and member_id <= len(item.members))
+  if not member_found:
+    res.non_member_update = true
+    result = some(res)
+    return
+
+  let member = item.members[member_id - 1]
+  assert member.local_id == member_id
+
+  if not member_found:
+    res.non_member_update = true
+    result = some(res)
+    return
+
+  var old_max_weight: float
+  var old_max_weight_set = false
+  for i, m in parent.get.members:
+    if not old_max_weight_set or m.weight > old_max_weight:
+      old_max_weight = m.weight
+      old_max_weight_set = true
+
+  var old_member: Option[GroupMember] = none(GroupMember)
+  var member_weight = parent.get.others_members_weight
+  if member_id - 1 <= parent.get.members.len:
+    old_member = some(parent.get.members[member_id - 1])
+    member_weight = old_member.get.weight
+
+  if old_member.is_none and parent.get.group_type == 0:
+    res.invalid_self_join = true
+    result = some(res)
+
+  if old_member.is_none and member.weight > parent.get.others_members_weight:
+    res.invalid_self_join_weight = true
+    result = some(res)
+
+  let owner = (member_weight == old_max_weight)
+
+  # Past this point, the member is valid and we can use it to validate the new
+  # group item
+
+  if old_max_weight != new_max_weight:
+    for i, m0 in parent.get.members:
+      let m1 = item.members[i]
+      if m0.weight == old_max_weight and m1.weight != new_max_weight:
+        # All owners in previous blocks must continue to be owner (but new
+        # owners can appear)
+        res.invalid_owner_weight_update = true
+        result = some(res)
+
+  if from_pod != "":
+    var pod_found = false
+    for itm in member.items:
+      if itm.pod_url == from_pod:
+        pod_found = true
+        break
+    if not pod_found:
+      res.non_authorized_pod_update = true
+      result = some(res)
+
+  if parent.get.group_type != item.group_type:
+    res.group_type_mismatch = true
+    result = some(res)
+
+  if parent.get.name != item.name and not owner:
+    res.non_owner_title_change = true
+    result = some(res)
+
+  if parent.get.others_members_weight != item.others_members_weight and
+     item.others_members_weight > member_weight:
+    res.invalid_others_weight = true
+    result = some(res)
+
+  if parent.get.moderation_default_score != item.moderation_default_score and not owner:
+    res.non_owner_default_score_change = true
+    result = some(res)
+
+  if parent.get.members.len > item.members.len:
+    res.invalid_remove_member = true
+    result = some(res)
+
+  for i, m1 in item.members:
+    let self = (m1.local_id == member_id)
+    let existing_member = (i < parent.get.members.len)
+
+    if existing_member:
+      let m0 = parent.get.members[i]
+      assert m0.local_id == m1.local_id
+      # Existing member, check for changes
+
+      if m0.weight == old_max_weight and m1.weight == new_max_weight:
+        discard
+        # Legitimate owner weight change
+
+      elif m0.weight > m1.weight: # weight decrease
+        if not self and m1.weight >= member_weight: 
+          # only allowed for self and members with lower weight
+          res.invalid_member_weight_decrease = i + 1
+          result = some(res)
+
+      elif m0.weight < m1.weight: # weight increase
+        if self or m1.weight > member_weight:
+          # not allowed for self, but allowed for other members with less weight
+          res.invalid_member_weight_increase = i + 1
+          result = some(res)
+
+      if m0.nickname != m1.nickname and not self and m1.weight >= member.weight:
+        # Nickname changed is only allowed for oneself and members with lower
+        # weight
+        res.invalid_member_nickname_change = i + 1
+        result = some(res)
+
+      for itm0 in m0.items:
+        var removed = true
+        for itm1 in m1.items:
+          if itm0.pod_url == itm1.pod_url and itm0.local_user_id == itm1.local_user_id:
+            removed = false
+            break
+        if removed and not self and m1.weight >= member_weight:
+          # Pod removal should be performed by self or strictly higher
+          # priviledged member
+          res.invalid_pod_removal = i + 1
+          result = some(res)
+    else:
+      # New member
+      if m1.weight > member_weight:
+        res.invalid_new_member_weight = i + 1
+        result = some(res)
+
+    var last_pod_url = ""
+    var last_pod_id = ""
+    for itm in m1.items:
+      if (itm.pod_url  < last_pod_url) or
+         (itm.pod_url == last_pod_url and itm.local_user_id <= last_pod_id):
+        res.invalid_member_item_ordering = i + 1
+        result = some(res)
+
+      last_pod_url = itm.pod_url
+      last_pod_id  = itm.local_user_id
+
+      if not existing_member:
+        # Do not check pods for new members
+        continue
+
+      let itm1 = itm
+      let m0 = parent.get.members[i]
+
+      var added = true
+      for itm0 in m0.items:
+        if itm0.pod_url == itm1.pod_url and itm0.local_user_id == itm1.local_user_id:
+          added = false
+          break
+
+      if added and not self:
+        res.invalid_pod_addition = i + 1
+        result = some(res)
+
+
 proc cmp(a, b: GroupMemberItem): int =
   result = system.cmp[string](a.pod_url, b.pod_url)
   if result != 0: return result
