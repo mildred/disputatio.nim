@@ -79,7 +79,8 @@ proc post*(ctx: Context) {.async, gcsafe.} =
         case req.function_name
         of  "count", "min", "max", "sum", "avg", "group_concat",
             "printf", "lower", "upper",
-            "row_number", "rank", "dense_rank":
+            "row_number", "rank", "dense_rank",
+            "json_group_object", "json_group_array":
           result = ok
         else:
           discard

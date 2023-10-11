@@ -111,4 +111,7 @@ proc from_html*(article: var Article, html_data: string) =
   article.paragraphs = @[]
   let html = html_data.parse_html()
   var path: seq[string] = @[]
-  add_paragraphs_from_nodes(article.paragraphs, html, path)
+  if html.kind == xnText or html.kind == xnCData or html.kind == xnEntity:
+    article.paragraphs.add((id: 0, guid: "", style: "", text: html.text))
+  else:
+    add_paragraphs_from_nodes(article.paragraphs, html, path)
