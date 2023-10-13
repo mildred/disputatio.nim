@@ -58,6 +58,13 @@ proc set_author*(article: var Article, group: GroupItem, member: GroupMember) =
   article.author_member[] = member
   article.author_member_id = member.local_id
 
+proc set_author*(article: var Article, group: GroupItem) =
+  new(article.author_group)
+  new(article.author_member)
+  article.author_group[] = group
+  article.author_group_id = group.id
+  article.author_group_guid = group.guid
+
 proc set_group*(article: var Article, group: GroupItem, member: GroupMember) =
   new(article.group)
   new(article.group_member)
@@ -66,6 +73,13 @@ proc set_group*(article: var Article, group: GroupItem, member: GroupMember) =
   article.group_guid = group.guid
   article.group_member[] = member
   article.group_member_id = member.local_id
+
+proc set_group*(article: var Article, group: GroupItem) =
+  new(article.group)
+  new(article.group_member)
+  article.group[] = group
+  article.group_id = group.id
+  article.group_guid = group.guid
 
 proc last_article(user_id: int, name: string): Option[tuple[id: int, patch_id: int, patch_guid: string, user_id: int, name: string, reply_guid: string, reply_index: Option[int], author_group_id: int, author_group_guid: string, author_member_id: int, group_id: int, group_guid: string, group_member_id: int, kind: Option[string], timestamp: float]] {.importdb: """
   SELECT   a.id, a.patch_id, p.guid, a.user_id, s.name, a.reply_guid, a.reply_index, a.author_group_id, a.author_group_guid, a.author_member_id, a.group_id, a.group_guid, a.group_member_id, a.kind, a.timestamp
@@ -185,6 +199,10 @@ proc insert_patch_item(patch_guid, paragraph_guid: string, rank: int) {.importdb
          $rank
 """.}
 
+proc exists_article(guid: string): tuple[exists: bool] {.importdb: """
+  SELECT EXISTS ( SELECT 1 FROM article WHERE guid = $guid )
+""".}
+
 proc insert_article(
   guid: string, patch_guid: string, user_id: int, subject_guid: Option[string],
   author_group_id: int, author_group_guid: string, author_member_id: int,
@@ -242,7 +260,7 @@ proc to_json_node*(art: Article): JsonNode =
 proc compute_hash*(obj: Subject | Paragraph | Patch | Article): string {.gcsafe.} =
   result = obj.to_json_node().compute_hash()
 
-proc create_article*(db: var Database, art: Article, parent_patch_id: string): int =
+proc create_article*(db: var Database, art: Article, parent_patch_id: string = ""): int =
   assert(art.guid != "")
   var subject_guid: Option[string]
   if art.reply_guid != "":
@@ -271,7 +289,9 @@ proc create_article*(db: var Database, art: Article, parent_patch_id: string): i
   let group_id = art.group.id
   let group_guid = art.group.guid
   let group_member_id = if art.group_member == nil: -1 else: art.group_member.local_id
-  result = db.insert_article(art.guid, pat.guid, art.user_id, subject_guid, author_group_id, author_group_guid, author_member_id, group_id, group_guid, group_member_id, if art.kind == "": none(string) else: some(art.kind)).id
+  db.transaction:
+    if not db.exists_article(art.guid).exists:
+      result = db.insert_article(art.guid, pat.guid, art.user_id, subject_guid, author_group_id, author_group_guid, author_member_id, group_id, group_guid, group_member_id, if art.kind == "": none(string) else: some(art.kind)).id
 
 proc group_get_posts*(db: var Database, group: GroupItem): seq[Article] =
   result = @[]

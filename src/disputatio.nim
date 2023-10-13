@@ -106,7 +106,7 @@ when isMainModule:
 
   var app = newApp(settings)
   app.use(contextMiddleware(dbfile, assets, smtp, sender, secretkey))
-  app.use(sessionMiddleware(settings))
+  app.use(sessionMiddleware(settings, path = "/"))
   app.use(contextLogin())
   init_routes(app)
   app.run(AppContext)
