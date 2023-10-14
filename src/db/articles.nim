@@ -48,6 +48,9 @@ type
     paragraphs: seq[Paragraph]
     score: float
 
+proc set_timestamp*(article: var Article) =
+  article.timestamp = get_julianday()
+
 proc set_author*(article: var Article, group: GroupItem, member: GroupMember) =
   new(article.author_group)
   new(article.author_member)
@@ -206,7 +209,8 @@ proc exists_article(guid: string): tuple[exists: bool] {.importdb: """
 proc insert_article(
   guid: string, patch_guid: string, user_id: int, subject_guid: Option[string],
   author_group_id: int, author_group_guid: string, author_member_id: int,
-  group_id: int, group_guid: string, group_member_id: int, kind: Option[string]
+  group_id: int, group_guid: string, group_member_id: int, kind: Option[string],
+  timestamp: float
 ): tuple[id: int] {.importdb: """
   INSERT INTO article (
     guid, patch_id, patch_guid, user_id, reply_guid, reply_index, author_group_id,
@@ -217,7 +221,7 @@ proc insert_article(
     $user_id, $subject_guid, NULL, $author_group_id, $author_group_guid,
     IIF($author_member_id < 0, NULL, $author_member_id),
     $group_id, $group_guid,
-    IIF($group_member_id < 0, NULL, $group_member_id), $kind, julianday('now')
+    IIF($group_member_id < 0, NULL, $group_member_id), $kind, $timestamp
   RETURNING id
 """.}
 
@@ -291,7 +295,7 @@ proc create_article*(db: var Database, art: Article, parent_patch_id: string = "
   let group_member_id = if art.group_member == nil: -1 else: art.group_member.local_id
   db.transaction:
     if not db.exists_article(art.guid).exists:
-      result = db.insert_article(art.guid, pat.guid, art.user_id, subject_guid, author_group_id, author_group_guid, author_member_id, group_id, group_guid, group_member_id, if art.kind == "": none(string) else: some(art.kind)).id
+      result = db.insert_article(art.guid, pat.guid, art.user_id, subject_guid, author_group_id, author_group_guid, author_member_id, group_id, group_guid, group_member_id, if art.kind == "": none(string) else: some(art.kind), art.timestamp).id
 
 proc group_get_posts*(db: var Database, group: GroupItem): seq[Article] =
   result = @[]

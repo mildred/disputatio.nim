@@ -107,7 +107,7 @@ proc add_paragraphs_from_nodes(par: var seq[Paragraph], node: XmlNode, path: var
           path[i] = "=" & path[i][1..^1]
         i = i + 1
 
-proc from_html*(article: var Article, html_data: string) =
+proc from_html*(article: var Article, html_data: string, parent_patch_guid: string = "") =
   article.paragraphs = @[]
   let html = html_data.parse_html()
   var path: seq[string] = @[]
@@ -115,3 +115,15 @@ proc from_html*(article: var Article, html_data: string) =
     article.paragraphs.add((id: 0, guid: "", style: "", text: html.text))
   else:
     add_paragraphs_from_nodes(article.paragraphs, html, path)
+
+  var i = 0
+  while i < article.paragraphs.len:
+    article.paragraphs[i].guid = article.paragraphs[i].compute_hash()
+    i = i + 1
+
+  var pat: Patch
+  pat.parent_guid = parent_patch_guid
+  pat.paragraphs  = article.paragraphs
+  pat.guid = pat.compute_hash()
+
+  article.patch_guid = pat.guid

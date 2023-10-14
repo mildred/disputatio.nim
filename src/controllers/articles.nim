@@ -62,6 +62,7 @@ proc update*(ctx: Context) {.async, gcsafe.} =
     article.reply_guid = sub.compute_hash()
     db[].insert_subject(article.reply_guid, sub.name)
 
+  article.set_timestamp()
   article.user_id = current_user.get.id
   article.from_html(html.get)
 

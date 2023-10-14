@@ -61,7 +61,7 @@ proc post*(ctx: Context) {.async, gcsafe.} =
   db.setAuthorizer do (req: AuthorizerRequest) -> AuthorizerResult:
     result = deny
     case req.caller
-    of "group_item", "group_member", "article", "patch", "patch_item", "paragraph", "article_score", "votes_incl_default":
+    of "group_item", "group_member", "article", "patch", "patch_item", "paragraph", "article_score", "article_member_score":
       # Allow most things from views we own
       # We must not allow the user to create views or functions with those names
       case req.action_code
@@ -80,7 +80,7 @@ proc post*(ctx: Context) {.async, gcsafe.} =
         of  "count", "min", "max", "sum", "avg", "group_concat",
             "printf", "lower", "upper",
             "row_number", "rank", "dense_rank",
-            "json_group_object", "json_group_array":
+            "json_group_object", "json_group_array", "json_object":
           result = ok
         else:
           discard

@@ -1,5 +1,5 @@
 const schema* = @["""
-PRAGMA user_version = 10""", """
+PRAGMA user_version = 11""", """
 CREATE TABLE "user" (
             id            INTEGER PRIMARY KEY NOT NULL
           )""", """
@@ -149,22 +149,24 @@ CREATE TABLE "vote" (
             FOREIGN KEY (group_id, group_guid) REFERENCES group_item (id, guid),
             FOREIGN KEY (article_id, article_guid) REFERENCES article (id, guid)
           )""", """
-CREATE VIEW article_score (group_guid, article_id, article_guid, score) AS
-          WITH
-            votes_incl_default AS (
-              SELECT  v.article_id, v.article_guid, g.root_guid, v.member_id,
-                      IIF(m.weight < 0, 1, MIN(MAX(SUM(v.vote), -1), 1)) vote, m.weight
-              FROM    vote v
-                      JOIN group_item g ON v.group_id = g.id
-                      JOIN group_member m ON (m.group_item_id, m.local_id) = (v.group_id, v.member_id)
-              GROUP BY v.article_id, v.article_guid, g.root_guid, v.member_id, m.weight
-              UNION ALL
-              SELECT  a.id article_id, a.guid article_guid, g.root_guid, 0 member_id,
-                      1 vote, g.moderation_default_score weight
-              FROM    article a JOIN group_item g ON a.group_id = g.id
-            )
-          SELECT  v.root_guid, v.article_id, v.article_guid,
-                  SUM(v.vote * v.weight) AS score
-          FROM    votes_incl_default v
-          GROUP BY v.root_guid, v.article_id, v.article_guid"""]
-
+CREATE VIEW article_member_score (group_guid, article_id, article_guid, member_id, member_weight, unbounded_vote, vote, score, default_score) AS
+          SELECT  g.root_guid, v.article_id, v.article_guid,
+                  v.member_id, m.weight member_weight, SUM(v.vote) unbounded_vote,
+                  IIF(m.weight < 0, 1, MIN(MAX(SUM(v.vote), -1), 1)) vote,
+                  IIF(m.weight < 0, 1, MIN(MAX(SUM(v.vote), -1), 1)) * m.weight score,
+                  0 default_score
+          FROM    vote v
+                  JOIN group_item g ON v.group_id = g.id
+                  JOIN group_member m ON (m.group_item_id, m.local_id) = (v.group_id, v.member_id)
+          GROUP BY g.root_guid, v.article_id, v.article_guid, v.member_id, m.weight
+          UNION ALL
+          SELECT  g.root_guid, a.id article_id, a.guid article_guid,
+                  0 member_id, g.moderation_default_score member_weight,
+                  1 unbounded_vote, 1 vote,
+                  g.moderation_default_score score, g.moderation_default_score default_score
+          FROM    article a JOIN group_item g ON a.group_id = g.id""", """
+CREATE VIEW article_score (group_guid, article_id, article_guid, score, default_score) AS
+          SELECT  v.group_guid, v.article_id, v.article_guid,
+                  SUM(v.score) AS score, SUM(v.default_score) AS default_score
+          FROM    article_member_score v
+          GROUP BY v.group_guid, v.article_id, v.article_guid"""]

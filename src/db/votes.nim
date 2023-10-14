@@ -91,6 +91,12 @@ proc save_new*(db: var Database, v: Vote): Option[int] =
   let res = db.insert_vote(v.guid, v.group_id, v.group_guid, v.member_id, v.article_id, v.article_guid, v.paragraph_rank, v.vote)
   if res.is_some: result = some(res.get.id)
 
+proc get_score*(group_guid, article_guid: string, member_id: int): Option[tuple[weight: float, unbounded_vote: float, vote: float, score: float]] {.importdb: """
+  SELECT member_weight, unbounded_vote, vote, score
+  FROM article_member_score
+  WHERE group_guid = $group_guid AND article_guid = $article_guid AND member_id = $member_id
+""".}
+
 proc get_score(group_guid, article_guid: string): Option[tuple[score: float]] {.importdb: """
   SELECT score
   FROM article_score

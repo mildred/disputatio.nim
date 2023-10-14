@@ -1,4 +1,5 @@
 import std/strutils
+import std/tempfiles
 import strformat
 import easy_sqlite3
 
@@ -493,6 +494,42 @@ proc migrate*(db: var Database): bool =
           GROUP BY v.root_guid, v.article_id, v.article_guid
         """)
         user_version = 10
+      of 10:
+        db.exec("""
+          DROP VIEW IF EXISTS article_user_score;
+        """)
+        db.exec("""
+          DROP VIEW IF EXISTS article_member_score;
+        """)
+        db.exec("""
+          DROP VIEW IF EXISTS article_score;
+        """)
+        db.exec("""
+          CREATE VIEW article_member_score (group_guid, article_id, article_guid, member_id, member_weight, unbounded_vote, vote, score, default_score) AS
+          SELECT  g.root_guid, v.article_id, v.article_guid,
+                  v.member_id, m.weight member_weight, SUM(v.vote) unbounded_vote,
+                  IIF(m.weight < 0, 1, MIN(MAX(SUM(v.vote), -1), 1)) vote,
+                  IIF(m.weight < 0, 1, MIN(MAX(SUM(v.vote), -1), 1)) * m.weight score,
+                  0 default_score
+          FROM    vote v
+                  JOIN group_item g ON v.group_id = g.id
+                  JOIN group_member m ON (m.group_item_id, m.local_id) = (v.group_id, v.member_id)
+          GROUP BY g.root_guid, v.article_id, v.article_guid, v.member_id, m.weight
+          UNION ALL
+          SELECT  g.root_guid, a.id article_id, a.guid article_guid,
+                  0 member_id, g.moderation_default_score member_weight,
+                  1 unbounded_vote, 1 vote,
+                  g.moderation_default_score score, g.moderation_default_score default_score
+          FROM    article a JOIN group_item g ON a.group_id = g.id
+        """)
+        db.exec("""
+          CREATE VIEW article_score (group_guid, article_id, article_guid, score, default_score) AS
+          SELECT  v.group_guid, v.article_id, v.article_guid,
+                  SUM(v.score) AS score, SUM(v.default_score) AS default_score
+          FROM    article_member_score v
+          GROUP BY v.group_guid, v.article_id, v.article_guid
+        """)
+        user_version = 11
       else:
         migrating = false
       if migrating:
@@ -508,12 +545,17 @@ proc migrate*(db: var Database): bool =
 
   let actual_schema = db.get_schema()
   if schema.schema != actual_schema:
-    echo "WARNING: Schema not up to date in code. Please replace with:"
     var schema_strings: seq[string] = @[]
     for str in actual_schema:
       schema_strings.add(&"\"\"\"\n{str}\"\"\"")
-    let schema_str: string = schema_strings.join(", ")
-    echo &"const schema* = @[{schema_str}]"
+    let schema_str: string = &"""const schema* = @[{schema_strings.join(", ")}]"""
+
+    let (cfile, path) = create_temp_file("schema", ".nim")
+    cfile.write(schema_str)
+    cfile.close()
+
+    echo &"WARNING: Schema not up to date in code. Please replace with schema in {path}"
+    echo &"cp {path} src/db/schema.nim"
     return false
 
   return true

@@ -32,6 +32,7 @@ proc create*(ctx: Context) {.async, gcsafe.} =
   let reply_guid = ctx.getFormParamsOption("reply_guid")
 
   var article: Article
+  article.set_timestamp()
   article.set_author(g.get, member.get)
   article.set_group(g.get, member.get)
   article.from_html(html.get)
